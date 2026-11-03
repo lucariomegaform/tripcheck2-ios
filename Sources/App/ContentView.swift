@@ -51,11 +51,9 @@ struct ContentView: View {
                 .font(.footnote)
                 .foregroundColor(.secondary)
 
-            if !SharedChannel.isConnected {
-                Text("Warning: the app and its screen reader can't share results (the shared app group is missing). This usually means the signing step left it out. See the README.")
-                    .font(.footnote)
-                    .foregroundColor(.orange)
-            }
+            Text(connectionText)
+                .font(.footnote)
+                .foregroundColor(.secondary)
         } header: {
             Text("Floating result window")
         }
@@ -70,6 +68,18 @@ struct ContentView: View {
             parts.append(model.pip.isActive ? "Floating window on." : "The window floats when you switch to the driver app.")
         }
         return parts.joined(separator: " ")
+    }
+
+    /// Which way the screen reader's results reach the app (useful when testing).
+    private var connectionText: String {
+        let folder = SharedChannel.isConnected
+            ? "Shared folder: on."
+            : "Shared folder: not available with this signing, so TripCheck uses its direct link instead."
+        guard let heard = model.lastHeard else {
+            return folder + " Screen reader: not heard from yet. Tap Start reading offers to test it."
+        }
+        let seconds = max(0, Int(Date().timeIntervalSince(heard)))
+        return folder + " Screen reader: last heard \(seconds) s ago, by \(model.heardVia)."
     }
 
     private func offerSection(_ o: Offer, _ v: Verdict) -> some View {

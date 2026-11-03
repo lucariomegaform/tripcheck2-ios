@@ -4,6 +4,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UIKit
 
 final class AppModel: ObservableObject {
     @Published var settings: TripSettings {
@@ -14,8 +15,12 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var reader = ReaderState()
     @Published private(set) var sampleOffer: Offer? = nil
+    /// When the screen broadcast reader was last heard from, and how ("shared folder" / "direct link").
+    @Published private(set) var lastHeard: Date? = nil
+    @Published private(set) var heardVia: String = ""
 
     let pip = PiPController()
+    private let link = LoopbackReceiver()
 
     private var sampleUntil = Date.distantPast
     private var sampleIndex = 0
@@ -37,6 +42,18 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         listenToReader()
+
+        // The direct link works even when signing left out the shared folder.
+        link.onState = { [weak self] state in
+            self?.receive(state, via: "direct link")
+        }
+        link.ensureRunning()
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            self?.link.ensureRunning()
+            self?.refresh()
+        }
+
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
         }
@@ -99,9 +116,18 @@ final class AppModel: ObservableObject {
         pip.show(OverlayRenderer.render(overlayMode, compact: settings.compactOverlay))
     }
 
+    private func receive(_ state: ReaderState, via: String) {
+        lastHeard = Date()
+        heardVia = via
+        if state != reader {
+            reader = state
+        }
+        refreshOverlay()
+    }
+
     fileprivate func refresh() {
-        if let latest = SharedChannel.read(), latest != reader {
-            reader = latest
+        if let latest = SharedChannel.read(), latest != reader, latest.updated >= reader.updated {
+            receive(latest, via: "shared folder")
         }
         if sampleOffer != nil && Date() >= sampleUntil {
             sampleOffer = nil

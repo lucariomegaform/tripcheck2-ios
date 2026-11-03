@@ -14,10 +14,11 @@ struct ReaderState: Codable, Equatable {
 enum SharedChannel {
     static let notificationName = "uk.tripcheck.reader-changed"
 
-    /// The shared folder. Tries the group named in Info.plist, then "group.<app bundle id>",
-    /// in case the signing tool renamed things.
-    static let containerURL: URL? = {
-        var candidates: [String] = []
+    /// The shared folder's name and location, if signing kept one. Tries, in order: the groups
+    /// the phone's install profile actually grants (signing tools sometimes rename them), the
+    /// group named in Info.plist, then "group.<app bundle id>".
+    static let container: (group: String, url: URL)? = {
+        var candidates = provisionedGroups()
         if let named = Bundle.main.object(forInfoDictionaryKey: "TripCheckAppGroup") as? String {
             candidates.append(named)
         }
@@ -29,14 +30,38 @@ enum SharedChannel {
         }
         for group in candidates {
             if let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) {
-                return url
+                return (group: group, url: url)
             }
         }
         return nil
     }()
 
-    /// False if the app and the reader can't share anything (the app group was lost when signing).
-    static var isConnected: Bool { containerURL != nil }
+    static var containerURL: URL? { container?.url }
+
+    /// The shared folder's name, for the app's connection details.
+    static var groupName: String? { container?.group }
+
+    /// False if signing left out the shared folder. TripCheck then uses the direct link instead.
+    static var isConnected: Bool { container != nil }
+
+    /// The app groups listed in this bundle's install profile (embedded.mobileprovision).
+    /// The profile is a signed file with a readable list of permissions inside it.
+    static func provisionedGroups() -> [String] {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8), options: [], in: start.lowerBound..<data.endIndex)
+        else { return [] }
+        let plistData = data.subdata(in: start.lowerBound..<end.upperBound)
+        guard let plist = (try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil)) as? [String: Any],
+              let entitlements = plist["Entitlements"] as? [String: Any],
+              let groups = entitlements["com.apple.security.application-groups"] as? [String]
+        else { return [] }
+        // Prefer TripCheck's own group if there are several.
+        return groups.sorted { a, b in
+            a.lowercased().contains("tripcheck") && !b.lowercased().contains("tripcheck")
+        }
+    }
 
     private static var stateURL: URL? {
         containerURL?.appendingPathComponent("reader-state.json")

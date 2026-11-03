@@ -51,9 +51,13 @@ If dragging leaves out the `.github` folder, use GitHub Desktop instead
    or red.
 2. Tap **Start reading offers**, then **Start Broadcast**, then switch to the driver app.
    The floating window should say *TripCheck ready*.
-3. If TripCheck shows an orange warning about the *shared app group*, the signing step
-   left that permission out. Tell Claude: the fix is a different signing option or a paid
-   developer account.
+3. Look at the **Shared folder / Screen reader** line under the Start button. Signing with a
+   free Apple ID usually leaves out the shared folder (the "app group"). That's fine: TripCheck
+   then uses its **direct link**, a private connection inside the phone. Once the broadcast
+   is on, the line should say *Screen reader: last heard … s ago*. If it still says *not heard
+   from yet* after about 10 seconds, tell Claude.
+4. If the iPhone asks whether TripCheck may use the local network, tap **Allow**. The direct
+   link only talks to the phone itself.
 
 ## What's in this folder
 - `Sources/Shared`: the rules and the offer reader (same as the desktop prototype)

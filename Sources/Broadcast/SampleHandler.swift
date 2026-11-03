@@ -18,6 +18,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastRead: CFAbsoluteTime = 0
     private var lastWrite: CFAbsoluteTime = 0
     private var missedReads = 0
+    /// The direct link to the app, used as well as the shared folder (which may be missing).
+    private let link = LoopbackSender()
 
     /// Seconds between reads.
     private let readInterval: CFAbsoluteTime = 0.5
@@ -32,6 +34,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastFinished() {
         state = ReaderState(broadcasting: false, offer: nil, unreadable: false, updated: Date())
         publish()
+        link.close()
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
@@ -122,6 +125,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func publish() {
         state.updated = Date()
         lastWrite = CFAbsoluteTimeGetCurrent()
-        SharedChannel.write(state)
+        SharedChannel.write(state)   // does nothing if there's no shared folder
+        link.send(state)
     }
 }

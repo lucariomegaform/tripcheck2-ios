@@ -20,6 +20,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TripCheck passes offer results from its screen reader to its floating window, inside this phone only. Nothing leaves the phone.</string>
 	<key>TripCheckAppGroup</key>
 	<string>group.uk.tripcheck.app</string>
 	<key>NSExtension</key>
