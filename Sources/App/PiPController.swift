@@ -1,0 +1,150 @@
+// The floating window. iPhones only let one app float over another as picture-in-picture
+// "video", so TripCheck plays its overlay pictures as a live video in a PiP window.
+
+import AVKit
+import AVFoundation
+import CoreMedia
+import UIKit
+
+final class PiPController: NSObject, ObservableObject {
+    /// The video surface. It must be on screen in the app for picture-in-picture to start.
+    let displayLayer = AVSampleBufferDisplayLayer()
+
+    @Published private(set) var isActive = false
+    let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
+
+    private var controller: AVPictureInPictureController?
+    private var possibleObservation: NSKeyValueObservation?
+    private var startWhenPossible = false
+
+    override init() {
+        super.init()
+        displayLayer.videoGravity = .resizeAspect
+
+        // Picture-in-picture needs a "playback" audio session. Mixing means the driver's
+        // music and navigation voice carry on as normal; TripCheck makes no sound.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? session.setActive(true)
+
+        guard isSupported else { return }
+        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: displayLayer, playbackDelegate: self)
+        let pip = AVPictureInPictureController(contentSource: source)
+        pip.delegate = self
+        pip.requiresLinearPlayback = true
+        // Also float automatically when the driver switches to the driver app.
+        pip.canStartPictureInPictureAutomaticallyFromInline = true
+        controller = pip
+
+        possibleObservation = pip.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] pip, _ in
+            guard let self = self, pip.isPictureInPicturePossible, self.startWhenPossible else { return }
+            self.startWhenPossible = false
+            DispatchQueue.main.async { pip.startPictureInPicture() }
+        }
+    }
+
+    func start() {
+        guard let pip = controller else { return }
+        if pip.isPictureInPictureActive { return }
+        if pip.isPictureInPicturePossible {
+            pip.startPictureInPicture()
+        } else {
+            startWhenPossible = true
+        }
+    }
+
+    func stop() {
+        startWhenPossible = false
+        controller?.stopPictureInPicture()
+    }
+
+    /// Shows a new overlay picture in the window (and in the in-app preview).
+    func show(_ image: CGImage?) {
+        guard let image = image, let sample = PiPController.sampleBuffer(from: image) else { return }
+        if displayLayer.status == .failed {
+            displayLayer.flush()
+        }
+        displayLayer.enqueue(sample)
+    }
+
+    /// Wraps a picture as one frame of video.
+    private static func sampleBuffer(from image: CGImage) -> CMSampleBuffer? {
+        let width = image.width
+        let height = image.height
+        let attributes: [String: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+        ]
+        var pixelBufferOut: CVPixelBuffer?
+        CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+                            attributes as CFDictionary, &pixelBufferOut)
+        guard let pixelBuffer = pixelBufferOut else { return nil }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(pixelBuffer),
+            width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+
+        var formatOut: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer,
+                                                     formatDescriptionOut: &formatOut)
+        guard let format = formatOut else { return nil }
+
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30),
+                                        presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+                                        decodeTimeStamp: .invalid)
+        var sampleOut: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer,
+                                                 formatDescription: format, sampleTiming: &timing,
+                                                 sampleBufferOut: &sampleOut)
+        guard let sample = sampleOut else { return nil }
+
+        // Show each frame straight away rather than on a video clock.
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict,
+                                 Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        return sample
+    }
+}
+
+extension PiPController: AVPictureInPictureControllerDelegate {
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        DispatchQueue.main.async { self.isActive = true }
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        DispatchQueue.main.async { self.isActive = false }
+    }
+}
+
+extension PiPController: AVPictureInPictureSampleBufferPlaybackDelegate {
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {}
+
+    func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
+        // A "live" stream with no end, so there's no progress bar.
+        CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+    }
+
+    func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
+        false
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
+                                    didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
+                                    skipByInterval skipInterval: CMTime,
+                                    completion completionHandler: @escaping () -> Void) {
+        completionHandler()
+    }
+}

@@ -1,0 +1,50 @@
+# Describes the Xcode project. The GitHub build turns this into TripCheck.xcodeproj
+# with XcodeGen, so nobody needs to open Xcode.
+
+name: TripCheck
+
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    GENERATE_INFOPLIST_FILE: NO
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  TripCheck:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/App
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_NAME: TripCheck
+        PRODUCT_BUNDLE_IDENTIFIER: uk.tripcheck.app
+        INFOPLIST_FILE: Config/App-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/TripCheck.entitlements
+    dependencies:
+      - target: TripCheckBroadcast
+        embed: true
+
+  TripCheckBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/Broadcast
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_NAME: TripCheckBroadcast
+        PRODUCT_BUNDLE_IDENTIFIER: uk.tripcheck.app.Broadcast
+        INFOPLIST_FILE: Config/Broadcast-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/TripCheckBroadcast.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES

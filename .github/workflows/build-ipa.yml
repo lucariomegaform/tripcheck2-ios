@@ -1,0 +1,75 @@
+# The build recipe. Every time code is uploaded to the main branch (or when you press
+# "Run workflow" on the Actions tab), one of GitHub's free cloud Macs:
+#   1. creates the Xcode project from project.yml,
+#   2. builds TripCheck without Apple signing,
+#   3. packages it as TripCheck.ipa, ready for Sideloadly to sign and install.
+# The .ipa and the build log appear under "Artifacts" on the finished run's page.
+
+name: Build iPhone app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build TripCheck.ipa
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Show the Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Create the Xcode project
+        run: xcodegen generate
+
+      - name: Build (without signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TripCheck.xcodeproj \
+            -target TripCheck \
+            -configuration Release \
+            -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+
+      - name: Package TripCheck.ipa
+        run: |
+          set -e
+          APP="build/Release-iphoneos/TripCheck.app"
+          ls -la "$APP" "$APP/PlugIns"
+          # A placeholder signature that carries the "shared app group" permission, so the
+          # signing tool can see that the app and its screen reader need to share results.
+          codesign --force --sign - --entitlements Config/TripCheckBroadcast.entitlements "$APP/PlugIns/TripCheckBroadcast.appex"
+          codesign --force --sign - --entitlements Config/TripCheck.entitlements "$APP"
+          rm -rf Payload TripCheck.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry TripCheck.ipa Payload
+          ls -la TripCheck.ipa
+
+      - name: Upload TripCheck.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: TripCheck-ipa
+          path: TripCheck.ipa
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
