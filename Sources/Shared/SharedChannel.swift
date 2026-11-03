@@ -9,6 +9,8 @@ struct ReaderState: Codable, Equatable {
     var offer: Offer? = nil
     var unreadable: Bool = false
     var updated: Date = Date()
+    /// The words the reader saw on the offer card (shown in the app, to help fix misreads).
+    var rawText: String? = nil
 }
 
 enum SharedChannel {

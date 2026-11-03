@@ -34,7 +34,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastFinished() {
         state = ReaderState(broadcasting: false, offer: nil, unreadable: false, updated: Date())
         publish()
-        link.close()
+        link.close()   // waits a moment so the "stopped" message gets through first
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
@@ -98,16 +98,25 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func update(with text: String, now: CFAbsoluteTime) {
         var next = state
         next.broadcasting = true
-        if let offer = OfferReader.parse(text) {
+        if var offer = OfferReader.parse(text) {
+            // Keep a rating read moments ago if this read of the same card missed it.
+            if offer.rating == nil, let previous = state.offer, previous.rating != nil,
+               previous.fare == offer.fare, previous.tripMiles == offer.tripMiles {
+                offer.rating = previous.rating
+            }
             next.offer = offer
             next.unreadable = false
+            next.rawText = text
             missedReads = 0
         } else {
             missedReads += 1
             if OfferReader.looksLikeOffer(text) {
                 // An offer card is showing but couldn't be read fully. Keep a good read of the
                 // same card if there was one; otherwise say so rather than guess.
-                if state.offer == nil { next.unreadable = true }
+                if state.offer == nil {
+                    next.unreadable = true
+                    next.rawText = text
+                }
             } else if missedReads >= 2 {
                 next.offer = nil
                 next.unreadable = false
@@ -117,7 +126,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let changed = next.offer != state.offer || next.unreadable != state.unreadable || next.broadcasting != state.broadcasting
         state = next
         // Write when something changed, and every few seconds anyway so the app knows the reader is alive.
-        if changed || now - lastWrite > 4 {
+        if changed || now - lastWrite > 2 {
             publish()
         }
     }

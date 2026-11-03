@@ -18,6 +18,8 @@ final class AppModel: ObservableObject {
     /// When the screen broadcast reader was last heard from, and how ("shared folder" / "direct link").
     @Published private(set) var lastHeard: Date? = nil
     @Published private(set) var heardVia: String = ""
+    /// True while the screen broadcast is on. The Start/Stop button follows this.
+    @Published private(set) var reading = false
 
     let pip = PiPController()
     private let link = LoopbackReceiver()
@@ -62,9 +64,21 @@ final class AppModel: ObservableObject {
 
     // MARK: state
 
-    /// The reader is running (it checks in every few seconds while the broadcast is on).
+    /// The reader is running: it checks in every 2 seconds while the broadcast is on, so
+    /// 8 seconds of silence means the broadcast has stopped (even if the "stopped" message was lost).
     var isReading: Bool {
-        reader.broadcasting && Date().timeIntervalSince(reader.updated) < 15
+        reader.broadcasting && Date().timeIntervalSince(reader.updated) < 8
+    }
+
+    /// Keeps the button and floating window in step with the broadcast.
+    private func updateReading() {
+        let now = isReading
+        guard now != reading else { return }
+        reading = now
+        if !now {
+            // Broadcast ended (Stop Broadcast on Apple's sheet, or the red pill): close the window.
+            pip.stop()
+        }
     }
 
     var overlayMode: OverlayMode {
@@ -113,7 +127,7 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshOverlay() {
-        pip.show(OverlayRenderer.render(overlayMode, compact: settings.compactOverlay))
+        pip.show(OverlayRenderer.render(overlayMode, settings: settings))
     }
 
     private func receive(_ state: ReaderState, via: String) {
@@ -122,6 +136,7 @@ final class AppModel: ObservableObject {
         if state != reader {
             reader = state
         }
+        updateReading()
         refreshOverlay()
     }
 
@@ -132,6 +147,7 @@ final class AppModel: ObservableObject {
         if sampleOffer != nil && Date() >= sampleUntil {
             sampleOffer = nil
         }
+        updateReading()
         refreshOverlay()
     }
 

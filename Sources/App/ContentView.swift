@@ -31,20 +31,21 @@ struct ContentView: View {
     private var overlaySection: some View {
         Section {
             OverlayPreview(layer: model.pip.displayLayer)
-                .aspectRatio(model.settings.compactOverlay ? 3 : 1.5, contentMode: .fit)
+                .aspectRatio(OverlayRenderer.canvasSize(model.settings).width / OverlayRenderer.canvasSize(model.settings).height,
+                             contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
 
             Button {
-                if model.isReading { model.stopReading() } else { model.startReading() }
+                if model.reading { model.stopReading() } else { model.startReading() }
             } label: {
-                Text(model.isReading ? "Stop reading offers" : "Start reading offers")
+                Text(model.reading ? "Stop reading offers" : "Start reading offers")
                     .font(.title3.bold())
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
             }
             .buttonStyle(.borderedProminent)
-            .tint(model.isReading ? .red : .green)
+            .tint(model.reading ? .red : .green)
             .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
 
             Text(statusText)
@@ -61,7 +62,7 @@ struct ContentView: View {
 
     private var statusText: String {
         var parts: [String] = []
-        parts.append(model.isReading ? "Reading offers." : "Not reading offers.")
+        parts.append(model.reading ? "Reading offers." : "Not reading offers.")
         if !model.pip.isSupported {
             parts.append("This iPhone doesn't support picture-in-picture.")
         } else {
@@ -85,12 +86,21 @@ struct ContentView: View {
     private func offerSection(_ o: Offer, _ v: Verdict) -> some View {
         Section {
             resultRow("Per mile", v.perMile.map { money($0) } ?? "?", minimum: money(model.settings.minPerMile), v.mile)
-            resultRow("Per minute", v.perMinute.map { money($0) } ?? "?", minimum: money(model.settings.minPerMinute), v.minute)
+            resultRow("Per hour", v.perHour.map { money($0) } ?? "?", minimum: money(model.settings.minHourly), v.hour)
             resultRow("Rider rating", v.rating.map { String(format: "%.2f", $0) } ?? "New rider",
                       minimum: String(format: "%.2f", model.settings.minRating), v.ratingCheck)
-            Text("\(money(v.fareUsed)) · pickup \(Int(o.pickupMinutes)) min, \(String(format: "%.1f", o.pickupMiles)) mi · trip \(Int(o.tripMinutes)) min, \(String(format: "%.1f", o.tripMiles)) mi")
+            Text(offerSummary(o, v))
                 .font(.footnote)
                 .foregroundColor(.secondary)
+            if let raw = model.reader.rawText, !raw.isEmpty, model.sampleOffer == nil {
+                DisclosureGroup("What TripCheck read") {
+                    Text(raw)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                    Button("Copy this text") { UIPasteboard.general.string = raw }
+                }
+                .font(.footnote)
+            }
         } header: {
             Text(o.exclusive ? "Exclusive offer" : "Trip radar offer")
         }
@@ -101,8 +111,8 @@ struct ContentView: View {
             Stepper(value: $model.settings.minPerMile, in: 0.5...3.0, step: 0.01) {
                 LabeledContent("Pay per mile", value: money(model.settings.minPerMile))
             }
-            Stepper(value: $model.settings.minPerMinute, in: 0.1...1.5, step: 0.01) {
-                LabeledContent("Pay per minute", value: money(model.settings.minPerMinute))
+            Stepper(value: $model.settings.minHourly, in: 5.0...100.0, step: 0.10) {
+                LabeledContent("Hourly rate", value: money(model.settings.minHourly))
             }
             Stepper(value: $model.settings.minRating, in: 4.0...5.0, step: 0.01) {
                 LabeledContent("Passenger rating", value: String(format: "%.2f", model.settings.minRating))
@@ -110,17 +120,22 @@ struct ContentView: View {
             Toggle("Count the drive to the pickup in the miles", isOn: $model.settings.includePickupMiles)
             Toggle("New riders (no rating) meet the rating minimum", isOn: $model.settings.acceptUnrated)
             Toggle("Leave holiday pay out of the fare", isOn: $model.settings.excludeHolidayPay)
-            Button("Reset to £1.20, £0.42 and 4.70") { model.resetMinimums() }
+            Toggle("Adjust figures for VAT flat rate scheme", isOn: $model.settings.vatFlatRate)
+            Button("Reset to £1.20, £25.00 and 4.70") { model.resetMinimums() }
         } header: {
             Text("Your minimums")
         } footer: {
-            Text("Pay per minute includes the drive to the pickup. Changes are saved straight away.")
+            Text("The hourly rate includes the drive to the pickup. With the VAT flat rate scheme on, each offer is worked out as offer × 1.2 × 0.9 (a £10.00 offer counts as £10.80) and your minimums include VAT. Changes are saved straight away.")
         }
     }
 
     private var windowSection: some View {
         Section {
-            Toggle("Compact window (verdict and three dots)", isOn: $model.settings.compactOverlay)
+            Toggle("Compact window (verdict, price and three dots)", isOn: $model.settings.compactOverlay)
+            VStack(alignment: .leading) {
+                LabeledContent("Text size", value: "\(Int((model.settings.overlayScale * 100).rounded()))%")
+                Slider(value: $model.settings.overlayScale, in: 0.5...2.0, step: 0.05)
+            }
             Button("Show a sample offer") { model.showSample() }
         } header: {
             Text("Window")
@@ -143,6 +158,16 @@ struct ContentView: View {
     }
 
     // MARK: helpers
+
+    private func offerSummary(_ o: Offer, _ v: Verdict) -> String {
+        var parts = ["Offer " + money(o.fare)]
+        if model.settings.vatFlatRate || model.settings.excludeHolidayPay {
+            parts[0] += ", worked out as " + money(v.fareUsed)
+        }
+        parts.append("pickup \(Int(o.pickupMinutes)) min, " + String(format: "%.1f", o.pickupMiles) + " mi")
+        parts.append("trip \(Int(o.tripMinutes)) min, " + String(format: "%.1f", o.tripMiles) + " mi")
+        return parts.joined(separator: " · ")
+    }
 
     private func resultRow(_ title: String, _ value: String, minimum: String, _ check: Check) -> some View {
         HStack {

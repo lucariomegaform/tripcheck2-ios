@@ -3,11 +3,15 @@
 
 import Foundation
 
+/// VAT flat rate scheme: the platform pays 20% VAT on top, then 10% of the takings goes to
+/// HMRC, so the money kept is the offer × 1.2 × 0.9 (a £10.00 offer is worth £10.80).
+let vatFlatRateFactor = 1.2 * 0.9
+
 struct TripSettings: Codable, Equatable {
     /// Minimum fare per mile, in pounds.
     var minPerMile: Double = 1.20
-    /// Minimum fare per minute (drive to pickup + trip), in pounds.
-    var minPerMinute: Double = 0.42
+    /// Minimum hourly rate (time for the drive to the pickup + the trip), in pounds.
+    var minHourly: Double = 25.00
     /// Minimum passenger rating.
     var minRating: Double = 4.70
     /// Count the drive to the pickup in the miles too.
@@ -16,28 +20,34 @@ struct TripSettings: Codable, Equatable {
     var acceptUnrated: Bool = false
     /// Take the "est. holiday entitlement included" amount off the fare first.
     var excludeHolidayPay: Bool = false
-    /// Smaller floating window: just the verdict and three dots.
+    /// Adjust figures for the VAT flat rate scheme (minimums then include VAT).
+    var vatFlatRate: Bool = false
+    /// Smaller floating window: just the verdict, the price and three dots.
     var compactOverlay: Bool = false
+    /// Size of the floating window's content: 1.0 is the normal size.
+    var overlayScale: Double = 1.0
 
     init() {}
 
-    // Read older saved settings even if a newer version added keys.
+    // Read older saved settings even if a newer version added or renamed keys.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = TripSettings()
         minPerMile = try c.decodeIfPresent(Double.self, forKey: .minPerMile) ?? d.minPerMile
-        minPerMinute = try c.decodeIfPresent(Double.self, forKey: .minPerMinute) ?? d.minPerMinute
+        minHourly = try c.decodeIfPresent(Double.self, forKey: .minHourly) ?? d.minHourly
         minRating = try c.decodeIfPresent(Double.self, forKey: .minRating) ?? d.minRating
         includePickupMiles = try c.decodeIfPresent(Bool.self, forKey: .includePickupMiles) ?? d.includePickupMiles
         acceptUnrated = try c.decodeIfPresent(Bool.self, forKey: .acceptUnrated) ?? d.acceptUnrated
         excludeHolidayPay = try c.decodeIfPresent(Bool.self, forKey: .excludeHolidayPay) ?? d.excludeHolidayPay
+        vatFlatRate = try c.decodeIfPresent(Bool.self, forKey: .vatFlatRate) ?? d.vatFlatRate
         compactOverlay = try c.decodeIfPresent(Bool.self, forKey: .compactOverlay) ?? d.compactOverlay
+        overlayScale = try c.decodeIfPresent(Double.self, forKey: .overlayScale) ?? d.overlayScale
     }
 
     mutating func resetMinimums() {
         let d = TripSettings()
         minPerMile = d.minPerMile
-        minPerMinute = d.minPerMinute
+        minHourly = d.minHourly
         minRating = d.minRating
         includePickupMiles = d.includePickupMiles
         acceptUnrated = d.acceptUnrated
@@ -78,15 +88,16 @@ enum Check: String, Codable {
 }
 
 struct Verdict {
+    /// The fare the sums use (after the holiday pay and VAT settings).
     var fareUsed: Double
     var perMile: Double?
-    var perMinute: Double?
+    var perHour: Double?
     var rating: Double?
     var mile: Check
-    var minute: Check
+    var hour: Check
     var ratingCheck: Check
 
-    var checks: [Check] { [mile, minute, ratingCheck] }
+    var checks: [Check] { [mile, hour, ratingCheck] }
     var met: Int { checks.filter { $0 == .pass }.count }
     var overall: Check {
         if checks.contains(.fail) { return .fail }
@@ -102,11 +113,12 @@ private func atLeast(_ value: Double, _ minimum: Double) -> Bool {
 }
 
 func evaluate(_ o: Offer, _ s: TripSettings) -> Verdict {
-    let fare = s.excludeHolidayPay ? o.fare - (o.holiday ?? 0) : o.fare
+    let base = s.excludeHolidayPay ? o.fare - (o.holiday ?? 0) : o.fare
+    let fare = s.vatFlatRate ? base * vatFlatRateFactor : base
     let miles = o.tripMiles + (s.includePickupMiles ? o.pickupMiles : 0)
     let minutes = o.pickupMinutes + o.tripMinutes
     let perMile: Double? = miles > 0 ? fare / miles : nil
-    let perMinute: Double? = minutes > 0 ? fare / minutes : nil
+    let perHour: Double? = minutes > 0 ? fare / minutes * 60 : nil
 
     func judge(_ v: Double?, _ min: Double) -> Check {
         guard let v = v else { return .unknown }
@@ -120,7 +132,7 @@ func evaluate(_ o: Offer, _ s: TripSettings) -> Verdict {
         ratingCheck = s.acceptUnrated ? .pass : .unknown
     }
 
-    return Verdict(fareUsed: fare, perMile: perMile, perMinute: perMinute, rating: o.rating,
-                   mile: judge(perMile, s.minPerMile), minute: judge(perMinute, s.minPerMinute),
+    return Verdict(fareUsed: fare, perMile: perMile, perHour: perHour, rating: o.rating,
+                   mile: judge(perMile, s.minPerMile), hour: judge(perHour, s.minHourly),
                    ratingCheck: ratingCheck)
 }

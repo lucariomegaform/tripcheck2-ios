@@ -28,8 +28,9 @@ final class LoopbackSender {
         }
     }
 
+    /// Closes the link after a short pause, so anything just sent still arrives.
     func close() {
-        queue.async { self.reset() }
+        queue.asyncAfter(deadline: .now() + 1.0) { self.reset() }
     }
 
     // Always called on `queue`.

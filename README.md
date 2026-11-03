@@ -1,7 +1,7 @@
 # TripCheck for iPhone
 
 TripCheck reads trip offers on screen and shows, in a small floating window, whether each
-offer meets your minimums: £ per mile, £ per minute (including the drive to the pickup)
+offer meets your minimums: £ per mile, £ per hour (including the drive to the pickup)
 and passenger rating. Green means it meets your minimum, red means it's below, and amber
 means TripCheck couldn't tell.
 

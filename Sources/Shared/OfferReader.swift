@@ -20,7 +20,11 @@ enum OfferReader {
     }
 
     static let money = rx(#"£\s*(\d{1,4}(?:[.,]\d{1,2})?)"#)
-    static let starRating = rx(#"(?i)(?:★|☆|\*|rating[:\s]*)\s*([1-5][.,]\d{1,2})|([1-5][.,]\d{1,2})\s*(?:★|☆|\*)"#)
+    // The fare sits on a line of its own: just the amount, no words.
+    static let fareOnly = rx(#"^[^A-Za-z]*£\s*(\d{1,4}(?:[.,]\d{1,2})?)[^A-Za-z]*$"#)
+    // The rating pill: "★ 4.81", "4.81", "4.81 Verified" (the star is often not read).
+    static let pillRating = rx(#"(?:^|[^\d£.,])([1-5])\.([0-9O]{2})(?:$|[^\d])"#)
+    static let starRating = rx(#"(?:★|☆|\*)\s*([1-5][.,]\d{1,2})|([1-5][.,]\d{1,2})\s*(?:★|☆|\*)"#)
     static let bareRating = rx(#"^\s*([1-5][.,]\d{2})\s*$"#)
     // "4 min • 0.9 mi", "32 mins · 14.2 mi", "1 hr 5 mins • 30 mi", "6 min (1.9 mi) away"
     static let leg = rx(#"(?i)(?:(\d+)\s*(?:hours?|hrs?|h)\s*)?(\d+)\s*(?:minutes?|mins?|m)\b\s*[(•·∙●\-–,.]?\s*(\d+(?:[.,]\d+)?)\s*(?:miles?|mi)\b\s*\)?"#)
@@ -56,17 +60,34 @@ enum OfferReader {
 
     private static func isButtonOrTag(_ line: String) -> Bool {
         let l = line.trimmingCharacters(in: .whitespaces).lowercased()
-        return ["accept", "confirm", "match", "exclusive", "new rider"].contains(l)
+        return ["accept", "confirm", "match", "exclusive", "new rider", "verified"].contains(l)
     }
 
     private static func isData(_ line: String) -> Bool {
         isMatch(money, line) || isMatch(leg, line) || isMatch(starRating, line) || isMatch(bareRating, line)
+            || ratingInLine(line) != nil
+    }
+
+    /// A rating on a short line such as the rating pill ("★ 4.81 Verified").
+    private static func ratingInLine(_ line: String) -> Double? {
+        guard !line.contains("£"), line.count <= 30,
+              let m = firstMatch(pillRating, line),
+              let whole = group(m, 1, line), let decimals = group(m, 2, line) else { return nil }
+        let r = num(whole + "." + decimals.replacingOccurrences(of: "O", with: "0"))
+        return (1.0...5.0).contains(r) ? r : nil
+    }
+
+    /// TripCheck's own floating window can sit over the screen; never read its words as the offer.
+    static func isOwnOverlay(_ line: String) -> Bool {
+        let l = line.lowercased()
+        return ["per mile", "per hour", "per min", "tripcheck", "meets", "below", "rating", "can't read", "check this offer", "with vat"]
+            .contains { l.contains($0) }
     }
 
     private static func splitLines(_ text: String) -> [String] {
         text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !isOwnOverlay($0) }
     }
 
     /// True when the screen looks like it shows an offer card, even if it couldn't be read fully.
@@ -95,7 +116,9 @@ enum OfferReader {
         guard !lines.isEmpty else { return nil }
 
         // Fare: the first £ amount that isn't the holiday pay line.
-        guard let fareLine = lines.first(where: { !isExtraMoney($0) && isMatch(money, $0) }),
+        let fareLine = lines.first(where: { !isExtraMoney($0) && isMatch(fareOnly, $0) })
+            ?? lines.first(where: { !isExtraMoney($0) && isMatch(money, $0) })
+        guard let fareLine = fareLine,
               let fareMatch = firstMatch(money, fareLine),
               let fareText = group(fareMatch, 1, fareLine) else { return nil }
         let fare = num(fareText)
@@ -106,18 +129,6 @@ enum OfferReader {
             holiday = num(h)
         }
 
-        var rating: Double? = nil
-        if let m = firstMatch(starRating, text), let r = group(m, 1, text) ?? group(m, 2, text) {
-            rating = num(r)
-        }
-        if rating == nil {
-            for line in lines {
-                if let m = firstMatch(bareRating, line), let r = group(m, 1, line) {
-                    rating = num(r)
-                    break
-                }
-            }
-        }
 
         var legs: [Leg] = []
         for (i, line) in lines.enumerated() {
@@ -148,6 +159,35 @@ enum OfferReader {
             return legs[i]
         }
         guard let pickup = take(.pickup), let trip = take(.trip) else { return nil }
+
+        // Rating: the pill under the pickup address (between the pickup and trip lines),
+        // then anything with a star, then a number on a line of its own.
+        var rating: Double? = nil
+        let from = min(pickup.line, trip.line), to = max(pickup.line, trip.line)
+        if to > from + 1 {
+            for line in lines[(from + 1)..<to] {
+                if let r = ratingInLine(line) {
+                    rating = r
+                    break
+                }
+            }
+        }
+        if rating == nil {
+            for line in lines {
+                if let m = firstMatch(starRating, line), let r = group(m, 1, line) ?? group(m, 2, line) {
+                    rating = num(r)
+                    break
+                }
+            }
+        }
+        if rating == nil {
+            for line in lines {
+                if let m = firstMatch(bareRating, line), let r = group(m, 1, line) {
+                    rating = num(r)
+                    break
+                }
+            }
+        }
 
         // Addresses can wrap onto more than one line: take lines until the next piece of data.
         func placeAfter(_ index: Int) -> String {
