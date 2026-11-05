@@ -11,6 +11,24 @@ struct ReaderState: Codable, Equatable {
     var updated: Date = Date()
     /// The words the reader saw on the offer card (shown in the app, to help fix misreads).
     var rawText: String? = nil
+    /// The offers seen during this broadcast, oldest first (the last 30). Sent every time,
+    /// so the app's history catches up even if it missed a message while it was asleep.
+    var recent: [SeenOffer]? = nil
+}
+
+/// One offer card as the reader saw it, and when it first appeared.
+struct SeenOffer: Codable, Equatable {
+    var id: String
+    var seenAt: Date
+    var offer: Offer
+
+    /// The same card read again moments later (the screen is read twice a second).
+    func isSameCard(as o: Offer, at date: Date) -> Bool {
+        abs(date.timeIntervalSince(seenAt)) <= 90
+            && abs(offer.fare - o.fare) < 0.005
+            && abs(offer.tripMiles - o.tripMiles) < 0.05
+            && abs(offer.tripMinutes - o.tripMinutes) < 0.5
+    }
 }
 
 enum SharedChannel {

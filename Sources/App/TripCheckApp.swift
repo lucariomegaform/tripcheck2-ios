@@ -8,6 +8,7 @@ struct TripCheckApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(model.history)
                 .preferredColorScheme(.dark)
         }
     }

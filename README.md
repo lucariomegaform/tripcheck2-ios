@@ -16,6 +16,17 @@ means TripCheck couldn't tell.
 3. **Floating window**: TripCheck shows the result in a picture-in-picture window that
    floats over the driver app. You can drag it, pinch it, or tuck it to the side.
 
+## Offer history
+
+While reading offers is on, every offer card is saved in the **History** tab, newest first.
+TripCheck records the date and time, offer amount, minutes and miles to pickup, journey
+minutes and miles, passenger rating, trip type, your location when the offer appeared, and
+a few more details from the card (exclusive or trip radar, holiday pay, the pickup and
+drop-off addresses). The details are saved exactly as shown on the card. The analysis next
+to each one uses your current settings. **Export** (top right) shares the history as a
+spreadsheet file. The first time you tap Start reading offers, the iPhone asks whether
+TripCheck may use your location; choose **Allow While Using App**.
+
 ## Getting an .ipa without a Mac
 
 ### 1. Put this folder on GitHub (once)

@@ -6,6 +6,21 @@ struct ContentView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
+        TabView {
+            mainTab
+                .tabItem { Label("TripCheck", systemImage: "car.fill") }
+            HistoryView()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+        }
+        .background(
+            BroadcastPickerHost()
+                .frame(width: 1, height: 1)
+                .opacity(0.02)
+                .allowsHitTesting(false)
+        )
+    }
+
+    private var mainTab: some View {
         NavigationStack {
             Form {
                 overlaySection
@@ -17,12 +32,6 @@ struct ContentView: View {
                 helpSection
             }
             .navigationTitle("TripCheck")
-            .background(
-                BroadcastPickerHost()
-                    .frame(width: 1, height: 1)
-                    .opacity(0.02)
-                    .allowsHitTesting(false)
-            )
         }
     }
 
@@ -117,7 +126,7 @@ struct ContentView: View {
             Stepper(value: $model.settings.minRating, in: 4.0...5.0, step: 0.01) {
                 LabeledContent("Passenger rating", value: String(format: "%.2f", model.settings.minRating))
             }
-            Toggle("Count the drive to the pickup in the miles", isOn: $model.settings.includePickupMiles)
+            Toggle("Count the drive to pickup in the analysis", isOn: $model.settings.includePickupMiles)
             Toggle("New riders (no rating) meet the rating minimum", isOn: $model.settings.acceptUnrated)
             Toggle("Leave holiday pay out of the fare", isOn: $model.settings.excludeHolidayPay)
             Toggle("Adjust figures for VAT flat rate scheme", isOn: $model.settings.vatFlatRate)
@@ -125,7 +134,7 @@ struct ContentView: View {
         } header: {
             Text("Your minimums")
         } footer: {
-            Text("The hourly rate includes the drive to the pickup. With the VAT flat rate scheme on, each offer is worked out as offer × 1.2 × 0.9 (a £10.00 offer counts as £10.80) and your minimums include VAT. Changes are saved straight away.")
+            Text("Counting the drive to pickup adds its miles and minutes to both the per mile and the hourly figures. With the VAT flat rate scheme on, each offer is worked out as offer × 1.2 × 0.9 (a £10.00 offer counts as £10.80) and your minimums include VAT. Changes are saved straight away.")
         }
     }
 

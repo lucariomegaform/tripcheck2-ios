@@ -5,6 +5,7 @@ import Foundation
 import Combine
 import SwiftUI
 import UIKit
+import CoreLocation
 
 final class AppModel: ObservableObject {
     @Published var settings: TripSettings {
@@ -22,6 +23,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var reading = false
 
     let pip = PiPController()
+    /// Every offer read while reading offers is on (the History tab).
+    let history = HistoryStore()
+    /// Where the driver is when each offer appears.
+    let location = LocationTracker()
     private let link = LoopbackReceiver()
 
     private var sampleUntil = Date.distantPast
@@ -75,9 +80,12 @@ final class AppModel: ObservableObject {
         let now = isReading
         guard now != reading else { return }
         reading = now
-        if !now {
+        if now {
+            location.start()
+        } else {
             // Broadcast ended (Stop Broadcast on Apple's sheet, or the red pill): close the window.
             pip.stop()
+            location.stop()
         }
     }
 
@@ -97,6 +105,7 @@ final class AppModel: ObservableObject {
     /// One tap: start the floating window and open Apple's Screen Broadcast sheet.
     func startReading() {
         pip.start()
+        location.start()   // asks for location permission the first time
         BroadcastPicker.shared.open()
     }
 
@@ -135,6 +144,9 @@ final class AppModel: ObservableObject {
         heardVia = via
         if state != reader {
             reader = state
+        }
+        if let seen = state.recent, !seen.isEmpty {
+            history.merge(seen) { [weak self] date in self?.location.location(near: date) }
         }
         updateReading()
         refreshOverlay()

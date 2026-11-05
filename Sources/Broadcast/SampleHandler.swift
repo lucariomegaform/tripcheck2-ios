@@ -108,6 +108,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             next.unreadable = false
             next.rawText = text
             missedReads = 0
+            remember(offer, in: &next)
         } else {
             missedReads += 1
             if OfferReader.looksLikeOffer(text) {
@@ -123,12 +124,28 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
         }
 
-        let changed = next.offer != state.offer || next.unreadable != state.unreadable || next.broadcasting != state.broadcasting
+        let changed = next.offer != state.offer || next.unreadable != state.unreadable
+            || next.broadcasting != state.broadcasting || next.recent != state.recent
         state = next
         // Write when something changed, and every few seconds anyway so the app knows the reader is alive.
         if changed || now - lastWrite > 2 {
             publish()
         }
+    }
+
+    /// Adds the offer to the list of offers seen, or fills in a rating a later read found.
+    private func remember(_ offer: Offer, in next: inout ReaderState) {
+        var recent = next.recent ?? []
+        let now = Date()
+        if let last = recent.last, last.isSameCard(as: offer, at: now) {
+            if last.offer.rating == nil && offer.rating != nil {
+                recent[recent.count - 1].offer.rating = offer.rating
+            }
+        } else {
+            recent.append(SeenOffer(id: UUID().uuidString, seenAt: now, offer: offer))
+            if recent.count > 30 { recent.removeFirst(recent.count - 30) }
+        }
+        next.recent = recent
     }
 
     private func publish() {

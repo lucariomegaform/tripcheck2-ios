@@ -10,11 +10,11 @@ let vatFlatRateFactor = 1.2 * 0.9
 struct TripSettings: Codable, Equatable {
     /// Minimum fare per mile, in pounds.
     var minPerMile: Double = 1.20
-    /// Minimum hourly rate (time for the drive to the pickup + the trip), in pounds.
+    /// Minimum hourly rate, in pounds.
     var minHourly: Double = 25.00
     /// Minimum passenger rating.
     var minRating: Double = 4.70
-    /// Count the drive to the pickup in the miles too.
+    /// Count the drive to the pickup in the analysis (both the miles and the time).
     var includePickupMiles: Bool = false
     /// Treat riders with no rating yet as meeting the rating minimum.
     var acceptUnrated: Bool = false
@@ -116,7 +116,7 @@ func evaluate(_ o: Offer, _ s: TripSettings) -> Verdict {
     let base = s.excludeHolidayPay ? o.fare - (o.holiday ?? 0) : o.fare
     let fare = s.vatFlatRate ? base * vatFlatRateFactor : base
     let miles = o.tripMiles + (s.includePickupMiles ? o.pickupMiles : 0)
-    let minutes = o.pickupMinutes + o.tripMinutes
+    let minutes = o.tripMinutes + (s.includePickupMiles ? o.pickupMinutes : 0)
     let perMile: Double? = miles > 0 ? fare / miles : nil
     let perHour: Double? = minutes > 0 ? fare / minutes * 60 : nil
 

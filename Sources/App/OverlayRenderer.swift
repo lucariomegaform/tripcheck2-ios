@@ -90,11 +90,12 @@ enum OverlayRenderer {
             case .unreadable:
                 drawMessage(all, area, k, dot: nil, title: "CAN'T READ", subtitle: "Check this offer yourself", band: amber)
             case .offer(let offer, let verdict):
-                let vatNote = settings.vatFlatRate ? String(format: "£%.2f with VAT", verdict.fareUsed) : nil
+                // The offer's price; with the VAT flat rate scheme on, the price with VAT (× 1.2 × 0.9).
+                let price = String(format: "£%.2f", offer.fare * (settings.vatFlatRate ? vatFlatRateFactor : 1))
                 if compact {
-                    drawCompact(all, area, k, offer, verdict)
+                    drawCompact(all, area, k, price, verdict)
                 } else {
-                    drawFull(all, area, k, offer, verdict, vatNote: vatNote)
+                    drawFull(all, area, k, price, verdict)
                 }
             }
         }
@@ -103,7 +104,7 @@ enum OverlayRenderer {
 
     // MARK: layouts
 
-    private static func drawFull(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ offer: Offer, _ v: Verdict, vatNote: String?) {
+    private static func drawFull(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ price: String, _ v: Verdict) {
         let overall = v.overall
         let margin = 30 * k
         let header = CGRect(x: 0, y: 0, width: all.width, height: area.minY + 112 * k)
@@ -113,17 +114,9 @@ enum OverlayRenderer {
         drawIcon(overall, center: CGPoint(x: 56 * k, y: headerMid.midY), size: 40 * k, colour: .white)
         drawText(word(overall), CGRect(x: 100 * k, y: headerMid.minY, width: 330 * k, height: headerMid.height), 64 * k, .heavy, .white)
 
-        // The trip price, as on the offer card.
-        let price = String(format: "£%.2f", offer.fare)
+        // The trip price.
         let priceBox = CGRect(x: all.width / 2, y: headerMid.minY, width: all.width / 2 - margin, height: headerMid.height)
-        if let note = vatNote {
-            drawText(price, CGRect(x: priceBox.minX, y: priceBox.minY + 8 * k, width: priceBox.width, height: priceBox.height * 0.6),
-                     48 * k, .heavy, .white, .right)
-            drawText(note, CGRect(x: priceBox.minX, y: priceBox.minY + priceBox.height * 0.6, width: priceBox.width, height: priceBox.height * 0.35),
-                     24 * k, .semibold, UIColor(white: 1, alpha: 0.85), .right)
-        } else {
-            drawText(price, priceBox, 56 * k, .heavy, .white, .right)
-        }
+        drawText(price, priceBox, 56 * k, .heavy, .white, .right)
 
         let rows: [(String, String, Check)] = [
             ("per mile", v.perMile.map { String(format: "£%.2f", $0) } ?? "?", v.mile),
@@ -149,7 +142,7 @@ enum OverlayRenderer {
         }
     }
 
-    private static func drawCompact(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ offer: Offer, _ v: Verdict) {
+    private static func drawCompact(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ price: String, _ v: Verdict) {
         let overall = v.overall
         let margin = 30 * k
         let block = CGRect(x: 0, y: 0, width: 420 * k, height: all.height)
@@ -168,7 +161,7 @@ enum OverlayRenderer {
             UIBezierPath(ovalIn: CGRect(x: center.x - dotRadius, y: center.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)).fill()
         }
         let priceBox = CGRect(x: block.maxX, y: area.minY, width: firstDotX - dotRadius - block.maxX, height: area.height)
-        drawText(String(format: "£%.2f", offer.fare), priceBox, 60 * k, .heavy, .white, .center)
+        drawText(price, priceBox, 60 * k, .heavy, .white, .center)
     }
 
     private static func drawMessage(_ all: CGRect, _ area: CGRect, _ k: CGFloat, dot: UIColor?, title: String, subtitle: String, band: UIColor?) {

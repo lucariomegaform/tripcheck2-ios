@@ -31,9 +31,12 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>TripCheck saves where you were when each trip offer appeared, for your offer history. It only does this while reading offers is on, and the history stays on this phone.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
