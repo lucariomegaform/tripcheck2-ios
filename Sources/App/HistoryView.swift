@@ -28,7 +28,7 @@ struct HistoryView: View {
                     } header: {
                         Text("\(history.records.count) offers")
                     } footer: {
-                        Text("Saved exactly as shown on each offer card. The analysis uses your current settings, so it updates if you change them. Swipe left on an offer to delete it.")
+                        Text("Saved exactly as shown on each offer card, without the pickup and drop-off addresses. The analysis uses your current minimums, so it updates if you change them. Swipe left on an offer to delete it.")
                     }
                 }
             }
@@ -45,7 +45,8 @@ struct HistoryView: View {
 
     private func row(_ r: OfferRecord) -> some View {
         let offer = r.offer
-        let v = evaluate(offer, model.settings)
+        // History shows plain green / red against the minimums (no nearly ranges or fare range).
+        let v = evaluate(offer, model.settings.strict)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Circle()
@@ -58,8 +59,23 @@ struct HistoryView: View {
                     .font(.headline)
             }
             // What the card showed
-            Text(r.rideType + (r.exclusive ? " · exclusive" : " · trip radar"))
-                .font(.footnote)
+            HStack(spacing: 6) {
+                if r.types.isEmpty {
+                    Text("Type not read")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                ForEach(r.types, id: \.self) { type in
+                    Text(type)
+                        .font(.caption.bold())
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                Text(r.exclusive ? "exclusive" : "trip radar")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
             Text(details(r))
                 .font(.footnote)
                 .foregroundColor(.secondary)

@@ -71,11 +71,17 @@ struct ContentView: View {
 
     private var statusText: String {
         var parts: [String] = []
-        parts.append(model.reading ? "Reading offers." : "Not reading offers.")
-        if !model.pip.isSupported {
-            parts.append("This iPhone doesn't support picture-in-picture.")
+        if model.reading {
+            parts.append("Reading offers.")
+            if !model.pip.isSupported {
+                parts.append("This iPhone doesn't support picture-in-picture.")
+            } else {
+                parts.append(model.pip.isActive ? "Floating window on." : "The window floats when you switch to the driver app.")
+            }
+        } else if model.waitingForBroadcast {
+            parts.append("Tap Start Broadcast on the iPhone's sheet. The floating window opens once reading has started.")
         } else {
-            parts.append(model.pip.isActive ? "Floating window on." : "The window floats when you switch to the driver app.")
+            parts.append("Not reading offers. The floating window opens when you start, and closes when you stop.")
         }
         return parts.joined(separator: " ")
     }
@@ -98,6 +104,11 @@ struct ContentView: View {
             resultRow("Per hour", v.perHour.map { money($0) } ?? "?", minimum: money(model.settings.minHourly), v.hour)
             resultRow("Rider rating", v.rating.map { String(format: "%.2f", $0) } ?? "New rider",
                       minimum: String(format: "%.2f", model.settings.minRating), v.ratingCheck)
+            if !v.fareInRange {
+                Label("Outside your fare range, so the floating window shows it faded.", systemImage: "circle.dashed")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
             Text(offerSummary(o, v))
                 .font(.footnote)
                 .foregroundColor(.secondary)
@@ -111,31 +122,102 @@ struct ContentView: View {
                 .font(.footnote)
             }
         } header: {
-            Text(o.exclusive ? "Exclusive offer" : "Trip radar offer")
+            Text(o.typeText + " · " + (o.exclusive ? "exclusive offer" : "trip radar offer"))
         }
     }
 
     private var minimumsSection: some View {
-        Section {
-            Stepper(value: $model.settings.minPerMile, in: 0.5...3.0, step: 0.01) {
-                LabeledContent("Pay per mile", value: money(model.settings.minPerMile))
+        Group {
+            Section {
+                sliderRow("Pay per mile", money(model.settings.minPerMile),
+                          $model.settings.minPerMile, 0.50...3.00, step: 0.05)
+                sliderRow("Nearly range", nearlyText(model.settings.perMileThreshold, money),
+                          $model.settings.perMileThreshold, 0...0.50, step: 0.05, small: true)
+            } header: {
+                Text("Pay per mile")
             }
-            Stepper(value: $model.settings.minHourly, in: 5.0...100.0, step: 0.10) {
-                LabeledContent("Hourly rate", value: money(model.settings.minHourly))
+
+            Section {
+                sliderRow("Hourly rate", money(model.settings.minHourly),
+                          $model.settings.minHourly, 5...60, step: 0.50)
+                sliderRow("Nearly range", nearlyText(model.settings.hourlyThreshold, money),
+                          $model.settings.hourlyThreshold, 0...10, step: 0.50, small: true)
+            } header: {
+                Text("Hourly rate")
             }
-            Stepper(value: $model.settings.minRating, in: 4.0...5.0, step: 0.01) {
-                LabeledContent("Passenger rating", value: String(format: "%.2f", model.settings.minRating))
+
+            Section {
+                sliderRow("Passenger rating", String(format: "%.2f", model.settings.minRating),
+                          $model.settings.minRating, 4.00...5.00, step: 0.01)
+                sliderRow("Nearly range", nearlyText(model.settings.ratingThreshold) { String(format: "%.2f", $0) },
+                          $model.settings.ratingThreshold, 0...0.30, step: 0.01, small: true)
+            } header: {
+                Text("Passenger rating")
+            } footer: {
+                Text("Green: meets your minimum. Red: below it. With a nearly range, an offer that misses by no more than that shows amber instead. For example, an hourly rate of £25.00 with a £1.00 range shows £24.01 in amber. Off (the default) means the minimum is strict.")
             }
-            Toggle("Count the drive to pickup in the analysis", isOn: $model.settings.includePickupMiles)
-            Toggle("New riders (no rating) meet the rating minimum", isOn: $model.settings.acceptUnrated)
-            Toggle("Leave holiday pay out of the fare", isOn: $model.settings.excludeHolidayPay)
-            Toggle("Adjust figures for VAT flat rate scheme", isOn: $model.settings.vatFlatRate)
-            Button("Reset to £1.20, £25.00 and 4.70") { model.resetMinimums() }
-        } header: {
-            Text("Your minimums")
-        } footer: {
-            Text("Counting the drive to pickup adds its miles and minutes to both the per mile and the hourly figures. With the VAT flat rate scheme on, each offer is worked out as offer × 1.2 × 0.9 (a £10.00 offer counts as £10.80) and your minimums include VAT. Changes are saved straight away.")
+
+            Section {
+                sliderRow("Minimum fare", money(model.settings.minFare), minFareBinding, 0...fareRangeTop, step: 0.50)
+                sliderRow("Maximum fare", model.settings.hasNoMaximumFare ? "Unlimited" : money(model.settings.maxFare),
+                          maxFareBinding, 0...fareRangeTop, step: 0.50)
+            } header: {
+                Text("Fare range")
+            } footer: {
+                Text("Offers priced outside this range show in faded colours in the floating window. Move the maximum all the way to £50 for no maximum. The price checked is the one the floating window shows (with VAT when the VAT setting is on).")
+            }
+
+            Section {
+                Toggle("Count the drive to pickup in the analysis", isOn: $model.settings.includePickupMiles)
+                Toggle("New riders (no rating) meet the rating minimum", isOn: $model.settings.acceptUnrated)
+                Toggle("Leave holiday pay out of the fare", isOn: $model.settings.excludeHolidayPay)
+                Toggle("Adjust figures for VAT flat rate scheme", isOn: $model.settings.vatFlatRate)
+                Button("Reset to £1.20, £25.00 and 4.70") { model.resetMinimums() }
+            } header: {
+                Text("Working it out")
+            } footer: {
+                Text("Counting the drive to pickup adds its miles and minutes to both the per mile and the hourly figures. With the VAT flat rate scheme on, each offer is worked out as offer × 1.2 × 0.9 (a £10.00 offer counts as £10.80) and your minimums include VAT. Reset also clears the nearly ranges and the fare range. Changes are saved straight away.")
+            }
         }
+    }
+
+    /// The minimum fare can't go above the maximum, and the other way round.
+    private var minFareBinding: Binding<Double> {
+        Binding(get: { model.settings.minFare }, set: { v in
+            model.settings.minFare = v
+            if model.settings.maxFare < v { model.settings.maxFare = v }
+        })
+    }
+
+    private var maxFareBinding: Binding<Double> {
+        Binding(get: { model.settings.maxFare }, set: { v in
+            model.settings.maxFare = v
+            if model.settings.minFare > v { model.settings.minFare = v }
+        })
+    }
+
+    private func nearlyText(_ v: Double, _ format: (Double) -> String) -> String {
+        v < 0.0001 ? "Off" : "within " + format(v)
+    }
+
+    private func sliderRow(_ title: String, _ value: String, _ binding: Binding<Double>,
+                           _ range: ClosedRange<Double>, step: Double, small: Bool = false) -> some View {
+        // Snap anything saved by older versions (which had finer steps) onto the slider.
+        let snapped = Binding<Double>(
+            get: { min(max(binding.wrappedValue, range.lowerBound), range.upperBound) },
+            set: { binding.wrappedValue = ($0 / step).rounded() * step })
+        return VStack(alignment: .leading, spacing: 2) {
+            LabeledContent(title) {
+                Text(value)
+                    .font(small ? .body : .headline)
+                    .monospacedDigit()
+                    .foregroundColor(small ? .secondary : .primary)
+            }
+            .font(small ? .subheadline : .body)
+            Slider(value: snapped, in: range, step: step)
+                .tint(small ? .orange : .green)
+        }
+        .padding(.vertical, 2)
     }
 
     private var windowSection: some View {
@@ -157,7 +239,8 @@ struct ContentView: View {
         Section {
             Text("1. Tap Start reading offers, then Start Broadcast on the iPhone's sheet.")
             Text("2. Switch to the driver app. The TripCheck window floats on top.")
-            Text("3. When an offer appears, the window shows green (meets your minimum), red (below it) or amber (couldn't tell).")
+            Text("3. When an offer appears, the window shows green (meets your minimum), red (below it) or amber (nearly meets it, or couldn't tell). Offers outside your fare range are faded.")
+            Text("4. To stop, tap Stop reading offers, then Stop Broadcast. The floating window closes by itself.")
             Text("TripCheck only reads the screen on this phone. It never logs in to your driver account and nothing is uploaded.")
                 .foregroundColor(.secondary)
         } header: {
@@ -198,6 +281,7 @@ struct ContentView: View {
     private func icon(_ c: Check) -> String {
         switch c {
         case .pass: return "checkmark.circle.fill"
+        case .near: return "minus.circle.fill"
         case .fail: return "xmark.circle.fill"
         case .unknown: return "exclamationmark.circle.fill"
         }

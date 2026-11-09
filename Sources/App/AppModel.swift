@@ -21,6 +21,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var heardVia: String = ""
     /// True while the screen broadcast is on. The Start/Stop button follows this.
     @Published private(set) var reading = false
+    /// Start tapped; waiting for the driver to tap Start Broadcast on Apple's sheet.
+    @Published private(set) var waitingForBroadcast = false
+    private var waitingSince: Date?
 
     let pip = PiPController()
     /// Every offer read while reading offers is on (the History tab).
@@ -75,17 +78,31 @@ final class AppModel: ObservableObject {
         reader.broadcasting && Date().timeIntervalSince(reader.updated) < 8
     }
 
-    /// Keeps the button and floating window in step with the broadcast.
+    /// Keeps the button and floating window in step with the broadcast. The broadcast decides:
+    /// the window opens once the screen reader has actually started, and closes (by itself)
+    /// as soon as it stops, however it was stopped.
     private func updateReading() {
+        if waitingForBroadcast, let since = waitingSince, Date().timeIntervalSince(since) > 90 {
+            waitingForBroadcast = false   // Apple's sheet was closed without starting
+        }
         let now = isReading
         guard now != reading else { return }
         reading = now
         if now {
+            waitingForBroadcast = false
             location.start()
+            pip.setAutoStart(true)
+            // Picture-in-picture can only be started while TripCheck is on screen. If it isn't,
+            // the window floats by itself the next time the driver leaves TripCheck.
+            if UIApplication.shared.applicationState == .active {
+                pip.start()
+            }
         } else {
             // Broadcast ended (Stop Broadcast on Apple's sheet, or the red pill): close the window.
             pip.stop()
             location.stop()
+            reader.offer = nil
+            reader.unreadable = false
         }
     }
 
@@ -102,15 +119,20 @@ final class AppModel: ObservableObject {
 
     // MARK: actions
 
-    /// One tap: start the floating window and open Apple's Screen Broadcast sheet.
+    /// Opens Apple's Screen Broadcast sheet. The floating window opens once the driver has
+    /// tapped Start Broadcast and the screen reader is running (not before, so it never
+    /// shows "Not reading" while the sheet is still up).
     func startReading() {
-        pip.start()
         location.start()   // asks for location permission the first time
+        waitingForBroadcast = true
+        waitingSince = Date()
         BroadcastPicker.shared.open()
     }
 
     /// Apple's sheet is the only way to stop a broadcast from inside an app; it shows "Stop Broadcast".
+    /// When the broadcast stops, the floating window closes by itself.
     func stopReading() {
+        waitingForBroadcast = false
         BroadcastPicker.shared.open()
     }
 

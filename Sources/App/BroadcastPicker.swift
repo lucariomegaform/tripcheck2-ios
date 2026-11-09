@@ -34,10 +34,16 @@ final class BroadcastPicker {
     }
 
     /// Opens Apple's Screen Broadcast sheet (it shows "Start Broadcast" or "Stop Broadcast").
-    func open() {
-        if let button = BroadcastPicker.findButton(in: view) {
-            button.sendActions(for: .allTouchEvents)
+    func open(attempt: Int = 0) {
+        // Apple's button can only open its sheet while it's part of the screen. Just after
+        // switching tabs or coming back to TripCheck it may not be yet, so try again briefly.
+        guard view.window != nil, let button = BroadcastPicker.findButton(in: view) else {
+            if attempt < 5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.open(attempt: attempt + 1) }
+            }
+            return
         }
+        button.sendActions(for: .allTouchEvents)
     }
 
     private static func findButton(in v: UIView) -> UIButton? {

@@ -25,25 +25,41 @@ enum OverlayRenderer {
 
     static let width: CGFloat = 600
 
-    static func fillColour(_ c: Check) -> UIColor {
+    static func fillColour(_ c: Check, muted: Bool = false) -> UIColor {
+        let colour: UIColor
         switch c {
-        case .pass: return green
-        case .fail: return red
-        case .unknown: return amber
+        case .pass: colour = green
+        case .fail: colour = red
+        case .near, .unknown: colour = amber
         }
+        return muted ? mute(colour) : colour
     }
 
-    static func textColour(_ c: Check) -> UIColor {
+    static func textColour(_ c: Check, muted: Bool = false) -> UIColor {
+        let colour: UIColor
         switch c {
-        case .pass: return greenText
-        case .fail: return redText
-        case .unknown: return amberText
+        case .pass: colour = greenText
+        case .fail: colour = redText
+        case .near, .unknown: colour = amberText
         }
+        return muted ? mute(colour) : colour
+    }
+
+    /// Faded, greyed version of a colour: for offers outside the driver's fare range. The
+    /// colour is still recognisable but clearly not "live".
+    static func mute(_ c: UIColor) -> UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let grey = 0.3 * r + 0.59 * g + 0.11 * b
+        // Keep a quarter of the colour, then darken towards the window's background.
+        func f(_ v: CGFloat) -> CGFloat { ((v * 0.25 + grey * 0.75) * 0.55) + 0.06 }
+        return UIColor(red: f(r), green: f(g), blue: f(b), alpha: 1)
     }
 
     static func word(_ c: Check) -> String {
         switch c {
         case .pass: return "MEETS"
+        case .near: return "NEARLY"
         case .fail: return "BELOW"
         case .unknown: return "CHECK"
         }
@@ -91,7 +107,7 @@ enum OverlayRenderer {
                 drawMessage(all, area, k, dot: nil, title: "CAN'T READ", subtitle: "Check this offer yourself", band: amber)
             case .offer(let offer, let verdict):
                 // The offer's price; with the VAT flat rate scheme on, the price with VAT (× 1.2 × 0.9).
-                let price = String(format: "£%.2f", offer.fare * (settings.vatFlatRate ? vatFlatRateFactor : 1))
+                let price = String(format: "£%.2f", shownPrice(offer, settings))
                 if compact {
                     drawCompact(all, area, k, price, verdict)
                 } else {
@@ -104,19 +120,28 @@ enum OverlayRenderer {
 
     // MARK: layouts
 
+    /// Shorter words get the full size; "NEARLY" is drawn a little smaller so it fits.
+    private static func wordSize(_ c: Check, _ size: CGFloat) -> CGFloat {
+        word(c).count > 5 ? size * 0.84 : size
+    }
+
     private static func drawFull(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ price: String, _ v: Verdict) {
         let overall = v.overall
+        // Outside the driver's fare range: same layout, muted colours.
+        let muted = !v.fareInRange
+        let ink = muted ? UIColor(white: 0.62, alpha: 1) : UIColor.white
         let margin = 30 * k
         let header = CGRect(x: 0, y: 0, width: all.width, height: area.minY + 112 * k)
-        fillColour(overall).setFill()
+        fillColour(overall, muted: muted).setFill()
         UIRectFill(header)
         let headerMid = CGRect(x: 0, y: area.minY, width: all.width, height: 112 * k)
-        drawIcon(overall, center: CGPoint(x: 56 * k, y: headerMid.midY), size: 40 * k, colour: .white)
-        drawText(word(overall), CGRect(x: 100 * k, y: headerMid.minY, width: 330 * k, height: headerMid.height), 64 * k, .heavy, .white)
+        drawIcon(overall, center: CGPoint(x: 56 * k, y: headerMid.midY), size: 40 * k, colour: ink)
+        drawText(word(overall), CGRect(x: 100 * k, y: headerMid.minY, width: 330 * k, height: headerMid.height),
+                 wordSize(overall, 64 * k), .heavy, ink)
 
         // The trip price.
         let priceBox = CGRect(x: all.width / 2, y: headerMid.minY, width: all.width / 2 - margin, height: headerMid.height)
-        drawText(price, priceBox, 56 * k, .heavy, .white, .right)
+        drawText(price, priceBox, 56 * k, .heavy, ink, .right)
 
         let rows: [(String, String, Check)] = [
             ("per mile", v.perMile.map { String(format: "£%.2f", $0) } ?? "?", v.mile),
@@ -133,23 +158,27 @@ enum OverlayRenderer {
             }
             let iconCenter = CGPoint(x: 56 * k, y: r.midY)
             let radius = 26 * k
-            fillColour(row.2).setFill()
+            fillColour(row.2, muted: muted).setFill()
             UIBezierPath(ovalIn: CGRect(x: iconCenter.x - radius, y: iconCenter.y - radius, width: radius * 2, height: radius * 2)).fill()
-            drawIcon(row.2, center: iconCenter, size: 24 * k, colour: .white)
-            drawText(row.0, CGRect(x: 100 * k, y: r.minY, width: 240 * k, height: r.height), 38 * k, .medium, UIColor(white: 0.78, alpha: 1))
+            drawIcon(row.2, center: iconCenter, size: 24 * k, colour: ink)
+            drawText(row.0, CGRect(x: 100 * k, y: r.minY, width: 240 * k, height: r.height), 38 * k, .medium,
+                     UIColor(white: muted ? 0.5 : 0.78, alpha: 1))
             drawText(row.1, CGRect(x: all.width / 2, y: r.minY, width: all.width / 2 - margin, height: r.height),
-                     64 * k, .bold, textColour(row.2), .right)
+                     64 * k, .bold, textColour(row.2, muted: muted), .right)
         }
     }
 
     private static func drawCompact(_ all: CGRect, _ area: CGRect, _ k: CGFloat, _ price: String, _ v: Verdict) {
         let overall = v.overall
+        let muted = !v.fareInRange
+        let ink = muted ? UIColor(white: 0.62, alpha: 1) : UIColor.white
         let margin = 30 * k
         let block = CGRect(x: 0, y: 0, width: 420 * k, height: all.height)
-        fillColour(overall).setFill()
+        fillColour(overall, muted: muted).setFill()
         UIRectFill(block)
-        drawIcon(overall, center: CGPoint(x: 70 * k, y: area.midY), size: 56 * k, colour: .white)
-        drawText(word(overall), CGRect(x: 120 * k, y: area.minY, width: 300 * k, height: area.height), 80 * k, .heavy, .white)
+        drawIcon(overall, center: CGPoint(x: 70 * k, y: area.midY), size: 56 * k, colour: ink)
+        drawText(word(overall), CGRect(x: 120 * k, y: area.minY, width: 300 * k, height: area.height),
+                 wordSize(overall, 80 * k), .heavy, ink)
 
         // Three dots on the right, the price between the verdict and the dots.
         let dotRadius = 20 * k
@@ -157,11 +186,11 @@ enum OverlayRenderer {
         let firstDotX = all.width - margin - dotRadius - 2 * dotGap
         for (i, check) in v.checks.enumerated() {
             let center = CGPoint(x: firstDotX + CGFloat(i) * dotGap, y: area.midY)
-            textColour(check).setFill()
+            textColour(check, muted: muted).setFill()
             UIBezierPath(ovalIn: CGRect(x: center.x - dotRadius, y: center.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)).fill()
         }
         let priceBox = CGRect(x: block.maxX, y: area.minY, width: firstDotX - dotRadius - block.maxX, height: area.height)
-        drawText(price, priceBox, 60 * k, .heavy, .white, .center)
+        drawText(price, priceBox, 60 * k, .heavy, ink, .center)
     }
 
     private static func drawMessage(_ all: CGRect, _ area: CGRect, _ k: CGFloat, dot: UIColor?, title: String, subtitle: String, band: UIColor?) {
@@ -214,6 +243,11 @@ enum OverlayRenderer {
             path.addLine(to: CGPoint(x: center.x + d, y: center.y + d))
             path.move(to: CGPoint(x: center.x - d, y: center.y + d))
             path.addLine(to: CGPoint(x: center.x + d, y: center.y - d))
+            path.stroke()
+        case .near:
+            // A short bar: "nearly there".
+            path.move(to: CGPoint(x: center.x - size * 0.42, y: center.y))
+            path.addLine(to: CGPoint(x: center.x + size * 0.42, y: center.y))
             path.stroke()
         case .unknown:
             path.move(to: CGPoint(x: center.x, y: center.y - size * 0.55))

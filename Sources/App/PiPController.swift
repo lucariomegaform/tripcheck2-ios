@@ -32,8 +32,9 @@ final class PiPController: NSObject, ObservableObject {
         let pip = AVPictureInPictureController(contentSource: source)
         pip.delegate = self
         pip.requiresLinearPlayback = true
-        // Also float automatically when the driver switches to the driver app.
-        pip.canStartPictureInPictureAutomaticallyFromInline = true
+        // Floats by itself when the driver switches to the driver app, but only while reading
+        // offers is on (see setAutoStart), so it never pops up saying "Not reading".
+        pip.canStartPictureInPictureAutomaticallyFromInline = false
         controller = pip
 
         possibleObservation = pip.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] pip, _ in
@@ -55,7 +56,21 @@ final class PiPController: NSObject, ObservableObject {
 
     func stop() {
         startWhenPossible = false
-        controller?.stopPictureInPicture()
+        controller?.canStartPictureInPictureAutomaticallyFromInline = false
+        guard let pip = controller, pip.isPictureInPictureActive else { return }
+        pip.stopPictureInPicture()
+        // If the window is mid-animation the first request can be ignored; ask again shortly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let pip = self?.controller, pip.isPictureInPictureActive,
+                  self?.startWhenPossible == false,
+                  pip.canStartPictureInPictureAutomaticallyFromInline == false else { return }
+            pip.stopPictureInPicture()
+        }
+    }
+
+    /// Lets the window float by itself when the driver leaves TripCheck (only while reading).
+    func setAutoStart(_ on: Bool) {
+        controller?.canStartPictureInPictureAutomaticallyFromInline = on
     }
 
     /// Shows a new overlay picture in the window (and in the in-app preview).

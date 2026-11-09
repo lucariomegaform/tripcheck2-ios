@@ -5,11 +5,16 @@
 //   £4.63
 //   £0.33 est. holiday entitlement included
 //   4 min • 0.9 mi
-//   20 Some Avenue, Enfield, EN1 4AE
+//   20 Some Avenue, Enfield, EN1 4AE      (addresses are skipped, never kept)
 //   ★ 4.80                       (the star may not be read, leaving "4.80")
 //   6 mins • 2.0 mi
 //   Some Road, Enfield, EN2 9DJ
 //   Confirm                      ("Match" on trip radar offers)
+//
+// To avoid reading other screens as offers (the driver app's trip history, a screenshot in
+// Photos while scrolling), a card only counts when its parts come in the card's order:
+// the fare, then the drive to the pickup, then the trip, then the Accept / Confirm / Match
+// button. The screen broadcast reader also waits until two reads in a row agree.
 
 import Foundation
 
@@ -58,14 +63,11 @@ enum OfferReader {
         return ["holiday", "entitlement", "included", "tip", "boost", "surge", "promotion", "+£"].contains { l.contains($0) }
     }
 
-    private static func isButtonOrTag(_ line: String) -> Bool {
-        let l = line.trimmingCharacters(in: .whitespaces).lowercased()
-        return ["accept", "confirm", "match", "exclusive", "new rider", "verified"].contains(l)
-    }
-
-    private static func isData(_ line: String) -> Bool {
-        isMatch(money, line) || isMatch(leg, line) || isMatch(starRating, line) || isMatch(bareRating, line)
-            || ratingInLine(line) != nil
+    /// The card's button: "Accept", "Confirm" (exclusive) or "Match" (trip radar), on a short line.
+    static func isButton(_ line: String) -> Bool {
+        let l = line.lowercased()
+        guard l.count <= 24 else { return false }
+        return ["accept", "confirm", "match"].contains { l.contains($0) }
     }
 
     /// A rating on a short line such as the rating pill ("★ 4.81 Verified").
@@ -80,7 +82,7 @@ enum OfferReader {
     /// TripCheck's own floating window can sit over the screen; never read its words as the offer.
     static func isOwnOverlay(_ line: String) -> Bool {
         let l = line.lowercased()
-        return ["per mile", "per hour", "per min", "tripcheck", "meets", "below", "rating", "can't read", "check this offer", "with vat"]
+        return ["per mile", "per hour", "per min", "tripcheck", "meets", "below", "rating", "can't read", "check this offer", "with vat", "nearly"]
             .contains { l.contains($0) }
     }
 
@@ -90,13 +92,13 @@ enum OfferReader {
             .filter { !$0.isEmpty && !isOwnOverlay($0) }
     }
 
-    /// True when the screen looks like it shows an offer card, even if it couldn't be read fully.
+    /// True when the screen looks like it shows an offer card (a fare and the card's button),
+    /// even if it couldn't be read fully.
     static func looksLikeOffer(_ text: String) -> Bool {
         let all = splitLines(text)
-        let lower = text.lowercased()
-        if lower.contains("holiday entitlement") { return true }
-        if all.contains(where: { ["confirm", "match"].contains($0.lowercased()) }) { return true }
-        return all.contains(where: { isMatch(money, $0) }) && all.contains(where: { isMatch(leg, $0) })
+        guard let fareIndex = all.firstIndex(where: { !isExtraMoney($0) && isMatch(money, $0) }) else { return false }
+        return all[(fareIndex + 1)...].contains(where: isButton)
+            && all.contains(where: { isMatch(leg, $0) })
     }
 
     // MARK: reading
@@ -110,28 +112,23 @@ enum OfferReader {
         let line: Int
     }
 
-    /// The offer on screen, or nil if there isn't a complete one.
+    /// The offer on screen, or nil if there isn't a complete card.
     static func parse(_ text: String) -> Offer? {
         let lines = splitLines(text)
         guard !lines.isEmpty else { return nil }
 
-        // Fare: the first £ amount that isn't the holiday pay line.
-        let fareLine = lines.first(where: { !isExtraMoney($0) && isMatch(fareOnly, $0) })
-            ?? lines.first(where: { !isExtraMoney($0) && isMatch(money, $0) })
-        guard let fareLine = fareLine,
-              let fareMatch = firstMatch(money, fareLine),
-              let fareText = group(fareMatch, 1, fareLine) else { return nil }
+        // Fare: the first £ amount on a line of its own that isn't the holiday pay line.
+        guard let fareIndex = lines.firstIndex(where: { !isExtraMoney($0) && isMatch(fareOnly, $0) })
+                ?? lines.firstIndex(where: { !isExtraMoney($0) && isMatch(money, $0) }),
+              let fareMatch = firstMatch(money, lines[fareIndex]),
+              let fareText = group(fareMatch, 1, lines[fareIndex]) else { return nil }
         let fare = num(fareText)
+        guard fare > 0 else { return nil }
 
-        var holiday: Double? = nil
-        if let line = lines.first(where: { $0.lowercased().contains("holiday") || $0.lowercased().contains("entitlement") }),
-           let m = firstMatch(money, line), let h = group(m, 1, line) {
-            holiday = num(h)
-        }
-
-
+        // The legs after the fare, in order.
         var legs: [Leg] = []
-        for (i, line) in lines.enumerated() {
+        for i in (fareIndex + 1)..<lines.count {
+            let line = lines[i]
             let lower = line.lowercased()
             let kind: LegKind
             if lower.contains("away") || lower.contains("pickup") || lower.contains("pick-up") {
@@ -147,21 +144,26 @@ enum OfferReader {
                 legs.append(Leg(kind: kind, minutes: hours * 60 + num(mins), miles: num(miles), line: i))
             }
         }
+        // The pickup comes first and the trip second (unless the words say otherwise).
+        guard legs.count >= 2 else { return nil }
+        var pickup = legs[0], trip = legs[1]
+        if pickup.kind == .trip && trip.kind == .pickup { swap(&pickup, &trip) }
+        guard trip.miles > 0 || trip.minutes > 0 else { return nil }
 
-        var used = Array(repeating: false, count: legs.count)
-        func take(_ want: LegKind) -> Leg? {
-            var index = legs.indices.first(where: { !used[$0] && legs[$0].kind == want })
-            if index == nil {
-                index = legs.indices.first(where: { !used[$0] && legs[$0].kind == .unsure })
-            }
-            guard let i = index else { return nil }
-            used[i] = true
-            return legs[i]
+        // The card ends with its button. Other screens (the trip history, a list of past
+        // offers) have fares and distances but no Accept / Confirm / Match button after them.
+        let lastLeg = max(pickup.line, trip.line)
+        guard let buttonIndex = lines.indices.first(where: { $0 > lastLeg && isButton(lines[$0]) }) else { return nil }
+        let card = Array(lines[fareIndex...buttonIndex])
+
+        var holiday: Double? = nil
+        if let line = lines[fareIndex...buttonIndex].first(where: { $0.lowercased().contains("holiday") || $0.lowercased().contains("entitlement") }),
+           let m = firstMatch(money, line), let h = group(m, 1, line) {
+            holiday = num(h)
         }
-        guard let pickup = take(.pickup), let trip = take(.trip) else { return nil }
 
         // Rating: the pill under the pickup address (between the pickup and trip lines),
-        // then anything with a star, then a number on a line of its own.
+        // then anything with a star on the card, then a number on a line of its own.
         var rating: Double? = nil
         let from = min(pickup.line, trip.line), to = max(pickup.line, trip.line)
         if to > from + 1 {
@@ -173,7 +175,7 @@ enum OfferReader {
             }
         }
         if rating == nil {
-            for line in lines {
+            for line in card {
                 if let m = firstMatch(starRating, line), let r = group(m, 1, line) ?? group(m, 2, line) {
                     rating = num(r)
                     break
@@ -181,7 +183,7 @@ enum OfferReader {
             }
         }
         if rating == nil {
-            for line in lines {
+            for line in card {
                 if let m = firstMatch(bareRating, line), let r = group(m, 1, line) {
                     rating = num(r)
                     break
@@ -189,35 +191,16 @@ enum OfferReader {
             }
         }
 
-        // Addresses can wrap onto more than one line: take lines until the next piece of data.
-        func placeAfter(_ index: Int) -> String {
-            var parts: [String] = []
-            var j = index + 1
-            while j < lines.count && !isData(lines[j]) && !isButtonOrTag(lines[j]) {
-                parts.append(lines[j])
-                j += 1
-            }
-            return parts.joined(separator: " ")
-        }
+        // Trip types: only from the top of the card (just above the fare, down to the drive to
+        // the pickup), so an address can never be taken for one. A trip can have several.
+        let header = lines[max(0, fareIndex - 3)..<min(pickup.line, trip.line)].filter { !isExtraMoney($0) }
+        let types = TripType.find(in: header.joined(separator: "\n"))
 
-        var rideType = "Trip"
-        for line in lines {
-            if isMatch(money, line) { break }
-            if !isButtonOrTag(line) && !isData(line) {
-                rideType = line
-                break
-            }
-        }
-        rideType = rideType.replacingOccurrences(of: "Exclusive", with: "", options: .caseInsensitive)
-            .trimmingCharacters(in: .whitespaces)
-        if rideType.isEmpty { rideType = "Trip" }
+        let headerText = header.joined(separator: " ").lowercased()
+        let exclusive = headerText.contains("exclusive") || card.contains(where: { $0.lowercased().contains("confirm") })
 
-        let exclusive = text.lowercased().contains("exclusive")
-            || lines.contains(where: { $0.lowercased() == "confirm" })
-
-        return Offer(rideType: rideType, exclusive: exclusive, fare: fare, holiday: holiday,
+        return Offer(types: types, exclusive: exclusive, fare: fare, holiday: holiday,
                      pickupMinutes: pickup.minutes, pickupMiles: pickup.miles,
-                     tripMinutes: trip.minutes, tripMiles: trip.miles, rating: rating,
-                     pickupPlace: placeAfter(pickup.line), dropPlace: placeAfter(trip.line))
+                     tripMinutes: trip.minutes, tripMiles: trip.miles, rating: rating)
     }
 }

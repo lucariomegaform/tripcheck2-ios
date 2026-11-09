@@ -18,6 +18,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastRead: CFAbsoluteTime = 0
     private var lastWrite: CFAbsoluteTime = 0
     private var missedReads = 0
+    /// A new card seen once, waiting for the next read to confirm it.
+    private var candidate: Offer?
     /// The direct link to the app, used as well as the shared folder (which may be missing).
     private let link = LoopbackSender()
 
@@ -99,17 +101,33 @@ class SampleHandler: RPBroadcastSampleHandler {
         var next = state
         next.broadcasting = true
         if var offer = OfferReader.parse(text) {
-            // Keep a rating read moments ago if this read of the same card missed it.
-            if offer.rating == nil, let previous = state.offer, previous.rating != nil,
-               previous.fare == offer.fare, previous.tripMiles == offer.tripMiles {
-                offer.rating = previous.rating
-            }
-            next.offer = offer
-            next.unreadable = false
-            next.rawText = text
             missedReads = 0
-            remember(offer, in: &next)
+            var confirmed = true
+            if let previous = state.offer, previous.sameNumbers(as: offer) {
+                // The card already showing, read again. Keep a rating read moments ago if this read missed it.
+                if offer.rating == nil { offer.rating = previous.rating }
+                if offer.types.isEmpty { offer.types = previous.types }
+            } else if let seenOnce = candidate, seenOnce.sameNumbers(as: offer) {
+                // A new card, read the same way twice in a row: it's real, not words scrolling past.
+                if offer.rating == nil { offer.rating = seenOnce.rating }
+                if offer.types.isEmpty { offer.types = seenOnce.types }
+            } else {
+                // First sight of a new card. Wait for the next read (half a second) to agree, so
+                // scrolling through other screens can't make up an offer from passing words.
+                confirmed = false
+                candidate = offer
+                next.offer = nil
+                next.unreadable = false
+            }
+            if confirmed {
+                candidate = nil
+                next.offer = offer
+                next.unreadable = false
+                next.rawText = text
+                remember(offer, in: &next)
+            }
         } else {
+            candidate = nil
             missedReads += 1
             if OfferReader.looksLikeOffer(text) {
                 // An offer card is showing but couldn't be read fully. Keep a good read of the
@@ -140,6 +158,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         if let last = recent.last, last.isSameCard(as: offer, at: now) {
             if last.offer.rating == nil && offer.rating != nil {
                 recent[recent.count - 1].offer.rating = offer.rating
+            }
+            if last.offer.types.isEmpty && !offer.types.isEmpty {
+                recent[recent.count - 1].offer.types = offer.types
             }
         } else {
             recent.append(SeenOffer(id: UUID().uuidString, seenAt: now, offer: offer))
