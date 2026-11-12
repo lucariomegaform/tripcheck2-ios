@@ -7,7 +7,10 @@
 // History and shows the result at the top of the screen for a few seconds:
 //   • as the shortcut's result panel (if "Show When Run" is on for the action): just the coloured box,
 //     no text line above it (that repeated the same figures), and/or
-//   • as a notification banner (Settings › "Show shortcut results as a banner").
+//   • as a notification banner (Settings › "Show shortcut results as a banner"), which
+//     TripCheck takes away after the driver's chosen number of seconds (default 5).
+// iOS gives apps no way to close the result panel on a timer (it waits for Done), so for a
+// popup that closes by itself, turn Show When Run off and use the banner.
 // The screenshot is read and thrown away: it isn't saved anywhere.
 
 import AppIntents
@@ -46,7 +49,7 @@ struct CheckTripOfferIntent: AppIntent {
             let looked = OfferReader.looksLikeOffer(words)
             let message = looked ? "Can't read this offer. Check it yourself." : "No trip offer found in this screenshot."
             if settings.shortcutBanner {
-                await ShortcutBanner.post(title: "⚠️ CAN'T READ", body: message)
+                await ShortcutBanner.post(title: "⚠️ CAN'T READ", body: message, closeAfter: settings.shortcutPopupSeconds)
             }
             let image = OverlayRenderer.render(.unreadable, settings: settings)
             return .result(view: OverlaySnippet(image: image, fallback: message))
@@ -58,7 +61,7 @@ struct CheckTripOfferIntent: AppIntent {
 
         let words2 = ShortcutBanner.words(offer, verdict, settings)
         if settings.shortcutBanner {
-            await ShortcutBanner.post(title: words2.title, body: words2.body)
+            await ShortcutBanner.post(title: words2.title, body: words2.body, closeAfter: settings.shortcutPopupSeconds)
         }
         let image = OverlayRenderer.render(.offer(offer, verdict), settings: settings)
         return .result(view: OverlaySnippet(image: image, fallback: words2.body))
@@ -135,8 +138,9 @@ enum ShortcutBanner {
         return (title, body)
     }
 
-    /// Replaces the previous result, so they don't pile up in Notification Centre.
-    static func post(title: String, body: String) async {
+    /// Replaces the previous result, so they don't pile up in Notification Centre, and takes
+    /// the banner away after `closeAfter` seconds.
+    static func post(title: String, body: String, closeAfter: Double) async {
         let center = UNUserNotificationCenter.current()
         center.delegate = BannerPresenter.shared
         let permission = await center.notificationSettings()
@@ -150,6 +154,36 @@ enum ShortcutBanner {
         content.interruptionLevel = .active
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         try? await center.add(request)
+        await scheduleClose(after: closeAfter)
+    }
+
+    /// Each banner gets a number, so an older banner's timer can't close a newer one.
+    /// Only used on the main thread.
+    private static var closeToken = 0
+
+    /// Removes the banner (from the screen and Notification Centre) after `seconds`. A short
+    /// background task keeps TripCheck awake that long after the shortcut has finished, so the
+    /// shortcut itself ends straight away and the button can be tapped again.
+    @MainActor
+    static func scheduleClose(after seconds: Double) {
+        closeToken += 1
+        let token = closeToken
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = UIApplication.shared.beginBackgroundTask(withName: "TripCheck banner") {
+            if task != .invalid {
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(1, seconds)) {
+            if token == closeToken {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+            }
+            if task != .invalid {
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+        }
     }
 
     /// Asks once for permission to show banners (from the Shortcut section in the app).

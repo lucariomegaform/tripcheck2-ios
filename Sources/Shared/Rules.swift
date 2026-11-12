@@ -41,6 +41,8 @@ struct TripSettings: Codable, Equatable {
     /// Screenshot shortcut: also show the result as a notification banner (it slides away
     /// after a few seconds, even if the shortcut's own result panel is switched off).
     var shortcutBanner: Bool = true
+    /// How long the shortcut's result banner stays before TripCheck takes it away, in seconds.
+    var shortcutPopupSeconds: Double = 5
 
     init() {}
 
@@ -63,6 +65,7 @@ struct TripSettings: Codable, Equatable {
         compactOverlay = try c.decodeIfPresent(Bool.self, forKey: .compactOverlay) ?? d.compactOverlay
         overlayScale = try c.decodeIfPresent(Double.self, forKey: .overlayScale) ?? d.overlayScale
         shortcutBanner = try c.decodeIfPresent(Bool.self, forKey: .shortcutBanner) ?? d.shortcutBanner
+        shortcutPopupSeconds = try c.decodeIfPresent(Double.self, forKey: .shortcutPopupSeconds) ?? d.shortcutPopupSeconds
     }
 
     mutating func resetMinimums() {

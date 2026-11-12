@@ -248,6 +248,12 @@ struct ContentView: View {
     private var shortcutSection: some View {
         Section {
             Toggle("Show shortcut results as a banner", isOn: $model.settings.shortcutBanner)
+            sliderRow("Close the banner after", "\(Int(model.settings.shortcutPopupSeconds.rounded())) seconds",
+                      $model.settings.shortcutPopupSeconds, 2...10, step: 1)
+                .disabled(!model.settings.shortcutBanner)
+            Text("The iPhone itself slides banners away after about 5 seconds, so longer times may not keep it on screen longer.")
+                .font(.caption)
+                .foregroundColor(.secondary)
             Button(bannerAllowed ? "Banners allowed" : "Allow banners") {
                 Task {
                     _ = await ShortcutBanner.requestPermission()
@@ -260,7 +266,7 @@ struct ContentView: View {
                     Text("1. Open the Shortcuts app and tap + to make a new shortcut. Name it TripCheck.")
                     Text("2. Add the action Take Screenshot.")
                     Text("3. Add the action Check Trip Offer (it's under TripCheck). It should say \"Check the trip offer in Screenshot\". If it doesn't, tap the blue word and choose Screenshot.")
-                    Text("4. Optional: tap the arrow on Check Trip Offer and turn on Show When Run to see the coloured result panel. With it off, you only get the banner.")
+                    Text("4. Tap the arrow on Check Trip Offer and turn Show When Run off. You then get the banner, which TripCheck closes after the time set above. With Show When Run on, you also get the coloured box, but iOS keeps that open until you tap Done: apps can't close it on a timer.")
                     Text("5. In Settings › Accessibility › Touch › AssistiveTouch, turn AssistiveTouch on. Under Custom Actions, set Single-Tap to the TripCheck shortcut. Remove the other menu items so one tap runs it straight away.")
                     Text("Instead of AssistiveTouch you can use Settings › Accessibility › Touch › Back Tap › Double Tap › TripCheck: tap the back of the phone twice.")
                         .foregroundColor(.secondary)

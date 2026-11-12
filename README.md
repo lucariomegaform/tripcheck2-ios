@@ -6,6 +6,14 @@ and passenger rating. Green means it meets your minimum, red means it's below, a
 means it nearly meets it (within the "nearly range" you set) or TripCheck couldn't tell.
 Offers priced outside your fare range are shown in faded colours.
 
+## What's new in 0.3.2
+
+- **Shortcut result closes by itself**: a new *Close the banner after* slider (2 to 10
+  seconds, default 5). TripCheck removes the result banner after that time. iOS gives apps
+  no way to close Shortcuts' own result panel (the box with *Done*) on a timer, so for a
+  popup that closes by itself, turn **Show When Run** off on the Check Trip Offer action
+  and keep *Show shortcut results as a banner* on.
+
 ## What's new in 0.3.1
 
 - The shortcut's result panel shows just the coloured box. The line of text above it,
