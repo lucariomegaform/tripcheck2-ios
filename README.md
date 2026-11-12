@@ -6,6 +6,11 @@ and passenger rating. Green means it meets your minimum, red means it's below, a
 means it nearly meets it (within the "nearly range" you set) or TripCheck couldn't tell.
 Offers priced outside your fare range are shown in faded colours.
 
+## What's new in 0.3.1
+
+- The shortcut's result panel shows just the coloured box. The line of text above it,
+  which repeated the same figures, is gone. (The banner, if switched on, is unchanged.)
+
 ## What's new in 0.3.0
 
 - **Floating window closes by itself after Stop**: after Stop Broadcast, Apple's sheet stays

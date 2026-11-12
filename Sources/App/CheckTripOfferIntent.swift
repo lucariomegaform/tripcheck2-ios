@@ -5,7 +5,8 @@
 // button (or Back Tap). When an offer appears, one tap takes a screenshot; TripCheck reads it
 // with the same on-device text recognition and rules as the broadcast reader, saves it in
 // History and shows the result at the top of the screen for a few seconds:
-//   • as the shortcut's result panel (if "Show When Run" is on for the action), and/or
+//   • as the shortcut's result panel (if "Show When Run" is on for the action): just the coloured box,
+//     no text line above it (that repeated the same figures), and/or
 //   • as a notification banner (Settings › "Show shortcut results as a banner").
 // The screenshot is read and thrown away: it isn't saved anywhere.
 
@@ -36,7 +37,7 @@ struct CheckTripOfferIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some IntentResult & ShowsSnippetView {
         let words = await readWords()
         let settings = TripSettings.saved()
         let now = Date()
@@ -48,7 +49,7 @@ struct CheckTripOfferIntent: AppIntent {
                 await ShortcutBanner.post(title: "⚠️ CAN'T READ", body: message)
             }
             let image = OverlayRenderer.render(.unreadable, settings: settings)
-            return .result(dialog: "\(message)", view: OverlaySnippet(image: image, fallback: message))
+            return .result(view: OverlaySnippet(image: image, fallback: message))
         }
 
         let verdict = evaluate(offer, settings)
@@ -60,7 +61,7 @@ struct CheckTripOfferIntent: AppIntent {
             await ShortcutBanner.post(title: words2.title, body: words2.body)
         }
         let image = OverlayRenderer.render(.offer(offer, verdict), settings: settings)
-        return .result(dialog: "\(words2.title). \(words2.body)", view: OverlaySnippet(image: image, fallback: words2.body))
+        return .result(view: OverlaySnippet(image: image, fallback: words2.body))
     }
 
     /// The words on the screenshot (read on the phone), or the text passed in.
