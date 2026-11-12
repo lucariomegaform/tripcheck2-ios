@@ -38,6 +38,9 @@ struct TripSettings: Codable, Equatable {
     var compactOverlay: Bool = false
     /// Size of the floating window's content: 1.0 is the normal size.
     var overlayScale: Double = 1.0
+    /// Screenshot shortcut: also show the result as a notification banner (it slides away
+    /// after a few seconds, even if the shortcut's own result panel is switched off).
+    var shortcutBanner: Bool = true
 
     init() {}
 
@@ -59,6 +62,7 @@ struct TripSettings: Codable, Equatable {
         vatFlatRate = try c.decodeIfPresent(Bool.self, forKey: .vatFlatRate) ?? d.vatFlatRate
         compactOverlay = try c.decodeIfPresent(Bool.self, forKey: .compactOverlay) ?? d.compactOverlay
         overlayScale = try c.decodeIfPresent(Double.self, forKey: .overlayScale) ?? d.overlayScale
+        shortcutBanner = try c.decodeIfPresent(Bool.self, forKey: .shortcutBanner) ?? d.shortcutBanner
     }
 
     mutating func resetMinimums() {

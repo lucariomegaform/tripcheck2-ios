@@ -17,7 +17,7 @@ struct HistoryView: View {
         NavigationStack {
             List {
                 if history.records.isEmpty {
-                    Text("No offers recorded yet. Offers are saved here while reading offers is on.")
+                    Text("No offers recorded yet. Offers are saved here while reading offers is on, and each time you use the screenshot shortcut.")
                         .foregroundColor(.secondary)
                 } else {
                     Section {
@@ -76,6 +76,9 @@ struct HistoryView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            Label(r.sourceText, systemImage: r.source == "shortcut" ? "hand.tap" : (r.source == "both" ? "checkmark.seal" : "dot.radiowaves.left.and.right"))
+                .font(.caption2)
+                .foregroundColor(.secondary)
             Text(details(r))
                 .font(.footnote)
                 .foregroundColor(.secondary)

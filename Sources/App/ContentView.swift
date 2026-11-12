@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import UserNotifications
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
@@ -29,6 +30,7 @@ struct ContentView: View {
                 }
                 minimumsSection
                 windowSection
+                shortcutSection
                 helpSection
             }
             .navigationTitle("TripCheck")
@@ -60,6 +62,12 @@ struct ContentView: View {
             Text(statusText)
                 .font(.footnote)
                 .foregroundColor(.secondary)
+
+            if model.pip.isActive && !model.reading {
+                // Should close by itself; this is the fallback while testing.
+                Button("Close the floating window") { model.closeFloatingWindow() }
+                    .font(.footnote)
+            }
 
             Text(connectionText)
                 .font(.footnote)
@@ -233,6 +241,47 @@ struct ContentView: View {
         } footer: {
             Text("Drag the floating window to any corner. Pinch it to resize it. Swipe it to the side of the screen to tuck it away.")
         }
+    }
+
+    /// The second way of capturing offers: a tap on the AssistiveTouch button runs a shortcut
+    /// that takes a screenshot and hands it to TripCheck.
+    private var shortcutSection: some View {
+        Section {
+            Toggle("Show shortcut results as a banner", isOn: $model.settings.shortcutBanner)
+            Button(bannerAllowed ? "Banners allowed" : "Allow banners") {
+                Task {
+                    _ = await ShortcutBanner.requestPermission()
+                    await refreshBannerPermission()
+                }
+            }
+            .disabled(bannerAllowed)
+            DisclosureGroup("Set up the shortcut (once)") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("1. Open the Shortcuts app and tap + to make a new shortcut. Name it TripCheck.")
+                    Text("2. Add the action Take Screenshot.")
+                    Text("3. Add the action Check Trip Offer (it's under TripCheck). It should say \"Check the trip offer in Screenshot\". If it doesn't, tap the blue word and choose Screenshot.")
+                    Text("4. Optional: tap the arrow on Check Trip Offer and turn on Show When Run to see the coloured result panel. With it off, you only get the banner.")
+                    Text("5. In Settings › Accessibility › Touch › AssistiveTouch, turn AssistiveTouch on. Under Custom Actions, set Single-Tap to the TripCheck shortcut. Remove the other menu items so one tap runs it straight away.")
+                    Text("Instead of AssistiveTouch you can use Settings › Accessibility › Touch › Back Tap › Double Tap › TripCheck: tap the back of the phone twice.")
+                        .foregroundColor(.secondary)
+                }
+                .font(.footnote)
+                .padding(.vertical, 4)
+            }
+        } header: {
+            Text("Screenshot shortcut (alternative to reading offers)")
+        } footer: {
+            Text("When an offer appears, tap the AssistiveTouch button. TripCheck reads the screenshot on the phone, saves the offer in History (marked \"screenshot shortcut\") and shows the result at the top of the screen for a few seconds. The screenshot itself isn't saved. This works with or without Start reading offers, so you can compare the two.")
+        }
+        .task { await refreshBannerPermission() }
+    }
+
+    @State private var bannerAllowed = false
+
+    @MainActor
+    private func refreshBannerPermission() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        bannerAllowed = status == .authorized || status == .provisional || status == .ephemeral
     }
 
     private var helpSection: some View {

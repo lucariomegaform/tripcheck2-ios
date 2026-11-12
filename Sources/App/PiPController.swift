@@ -16,6 +16,8 @@ final class PiPController: NSObject, ObservableObject {
     private var controller: AVPictureInPictureController?
     private var possibleObservation: NSKeyValueObservation?
     private var startWhenPossible = false
+    /// True while reading offers is on. When false, the window is kept closed.
+    private(set) var wantsOpen = false
 
     override init() {
         super.init()
@@ -28,6 +30,12 @@ final class PiPController: NSObject, ObservableObject {
         try? session.setActive(true)
 
         guard isSupported else { return }
+        makeController()
+        NotificationCenter.default.addObserver(self, selector: #selector(appBecameActive),
+                                               name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    private func makeController() {
         let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: displayLayer, playbackDelegate: self)
         let pip = AVPictureInPictureController(contentSource: source)
         pip.delegate = self
@@ -38,13 +46,14 @@ final class PiPController: NSObject, ObservableObject {
         controller = pip
 
         possibleObservation = pip.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] pip, _ in
-            guard let self = self, pip.isPictureInPicturePossible, self.startWhenPossible else { return }
+            guard let self = self, pip.isPictureInPicturePossible, self.startWhenPossible, self.wantsOpen else { return }
             self.startWhenPossible = false
             DispatchQueue.main.async { pip.startPictureInPicture() }
         }
     }
 
     func start() {
+        wantsOpen = true
         guard let pip = controller else { return }
         if pip.isPictureInPictureActive { return }
         if pip.isPictureInPicturePossible {
@@ -54,24 +63,63 @@ final class PiPController: NSObject, ObservableObject {
         }
     }
 
+    /// Closes the window, and keeps making sure it's closed.
+    ///
+    /// Why the retries: after Stop Broadcast, Apple's broadcast sheet stays on screen over
+    /// TripCheck until it's dismissed, and while it's up iOS ignores requests to close the
+    /// window. So TripCheck asks again over the next few seconds, again as soon as TripCheck
+    /// is back on screen, and if the window still won't close, it replaces the window's
+    /// controller, which takes the window away.
     func stop() {
+        wantsOpen = false
         startWhenPossible = false
         controller?.canStartPictureInPictureAutomaticallyFromInline = false
-        guard let pip = controller, pip.isPictureInPictureActive else { return }
-        pip.stopPictureInPicture()
-        // If the window is mid-animation the first request can be ignored; ask again shortly.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            guard let pip = self?.controller, pip.isPictureInPictureActive,
-                  self?.startWhenPossible == false,
-                  pip.canStartPictureInPictureAutomaticallyFromInline == false else { return }
-            pip.stopPictureInPicture()
+        enforceClosed()
+        for delay in [0.4, 1.0, 2.0, 4.0, 8.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.enforceClosed()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) { [weak self] in
+            self?.enforceClosed(hard: true)
         }
     }
 
     /// Lets the window float by itself when the driver leaves TripCheck (only while reading).
     func setAutoStart(_ on: Bool) {
+        if on { wantsOpen = true }
         controller?.canStartPictureInPictureAutomaticallyFromInline = on
     }
+
+    /// TripCheck came back on screen: if the window should be closed, close it now.
+    @objc private func appBecameActive() {
+        guard !wantsOpen else { return }
+        enforceClosed()
+        // Apple's sheet may still be sliding away; ask again, then replace the window if needed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.enforceClosed() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in self?.enforceClosed(hard: true) }
+    }
+
+    private func enforceClosed(hard: Bool = false) {
+        guard !wantsOpen, let pip = controller else { return }
+        guard pip.isPictureInPictureActive || isActive else { return }
+        if hard {
+            // Last resort: a new controller. The old window goes away with the old controller.
+            closeAttempts += 1
+            pip.delegate = nil
+            pip.stopPictureInPicture()
+            controller = nil
+            possibleObservation = nil
+            DispatchQueue.main.async { self.isActive = false }
+            makeController()
+            return
+        }
+        closeAttempts += 1
+        pip.stopPictureInPicture()
+    }
+
+    /// How many times TripCheck has had to ask the window to close (for testing).
+    private(set) var closeAttempts = 0
 
     /// Shows a new overlay picture in the window (and in the in-app preview).
     func show(_ image: CGImage?) {
@@ -134,7 +182,11 @@ final class PiPController: NSObject, ObservableObject {
 
 extension PiPController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        DispatchQueue.main.async { self.isActive = true }
+        DispatchQueue.main.async {
+            self.isActive = true
+            // Opened just as reading stopped: close it again.
+            if !self.wantsOpen { self.enforceClosed() }
+        }
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {

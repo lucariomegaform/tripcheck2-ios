@@ -6,6 +6,24 @@ and passenger rating. Green means it meets your minimum, red means it's below, a
 means it nearly meets it (within the "nearly range" you set) or TripCheck couldn't tell.
 Offers priced outside your fare range are shown in faded colours.
 
+## What's new in 0.3.0
+
+- **Floating window closes by itself after Stop**: after Stop Broadcast, Apple's sheet stays
+  over TripCheck, and while it's up iOS ignores requests to close the window. TripCheck
+  now keeps asking for several seconds, again as soon as TripCheck is back on screen, and
+  as a last resort replaces the window. If it ever stays open, there's a
+  *Close the floating window* button under the Start button.
+- **Screenshot shortcut (second way of capturing offers)**: TripCheck adds a
+  **Check Trip Offer** action to the Shortcuts app. Make a shortcut with *Take Screenshot*
+  then *Check Trip Offer*, and put it on the AssistiveTouch button (or Back Tap). One tap
+  when an offer appears: TripCheck reads the screenshot on the phone, saves the offer in
+  History and shows the result at the top of the screen for a few seconds, as a coloured
+  banner (🟢 meets, 🟠 nearly / couldn't tell, 🔴 below) and, if *Show When Run* is on,
+  as Shortcuts' result panel with the same picture as the floating window. Setup steps are
+  in the app under **Screenshot shortcut**. The screenshot isn't saved.
+- **History shows how each offer was captured**: screen broadcast, screenshot shortcut, or
+  both (the same card caught both ways is saved once). The export has a *Captured by* column.
+
 ## What's new in 0.2.0
 
 - **Locations**: offers that arrive while you're parked (several at home, at a rank) now
@@ -98,13 +116,15 @@ If dragging leaves out the `.github` folder, use GitHub Desktop instead
    link only talks to the phone itself.
 
 ## What's in this folder
-- `Sources/Shared`: the rules and the offer reader (same as the desktop prototype)
+- `Sources/Shared`: the rules, the offer reader (same as the desktop prototype) and the
+  on-device text recognition used by both ways of capturing offers
+- `Sources/App/CheckTripOfferIntent.swift`: the Check Trip Offer shortcut action
 - `Sources/Broadcast`: the screen broadcast reader
 - `Sources/App`: the app screens, Start button and floating window
 - `Config`: app settings and permissions
 - `project.yml`: the project description used by the build
 - `.github/workflows/build-ipa.yml`: the build recipe for GitHub's cloud Macs
 
-Version 0.2.0 was written on Windows after live testing of 0.1.0; its first GitHub build is
-also the first time these changes are compiled. If the build shows a red cross, send the
+Version 0.3.0 was written on Windows after live testing of 0.2.0; its first GitHub build is
+also the first time these changes are compiled (the shortcut action is new and untested). If the build shows a red cross, send the
 build-log to Claude.

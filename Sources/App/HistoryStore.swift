@@ -30,9 +30,21 @@ struct OfferRecord: Codable, Identifiable, Equatable {
     var longitude: Double?
     /// How precise that location is, in metres.
     var locationAccuracy: Double?
+    /// How the offer was captured: "broadcast" (screen broadcast) or "shortcut" (screenshot
+    /// shortcut). Lets the driver compare the two ways.
+    var source: String = "broadcast"
 
-    init(_ seen: SeenOffer, location: CLLocation?) {
+    var sourceText: String {
+        switch source {
+        case "shortcut": return "screenshot shortcut"
+        case "both": return "broadcast and shortcut"
+        default: return "screen broadcast"
+        }
+    }
+
+    init(_ seen: SeenOffer, location: CLLocation?, source: String = "broadcast") {
         let o = seen.offer
+        self.source = source
         id = seen.id
         seenAt = seen.seenAt
         fare = o.fare
@@ -57,7 +69,7 @@ struct OfferRecord: Codable, Identifiable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, seenAt, fare, pickupMinutes, pickupMiles, tripMinutes, tripMiles, rating, types
-        case exclusive, holiday, latitude, longitude, locationAccuracy
+        case exclusive, holiday, latitude, longitude, locationAccuracy, source
         case rideType   // older versions: one line of text, sometimes part of an address
     }
 
@@ -83,6 +95,7 @@ struct OfferRecord: Codable, Identifiable, Equatable {
         latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
         locationAccuracy = try c.decodeIfPresent(Double.self, forKey: .locationAccuracy)
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "broadcast"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -101,6 +114,7 @@ struct OfferRecord: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(latitude, forKey: .latitude)
         try c.encodeIfPresent(longitude, forKey: .longitude)
         try c.encodeIfPresent(locationAccuracy, forKey: .locationAccuracy)
+        try c.encode(source, forKey: .source)
     }
 
     /// Back to an offer, so the same rules can analyse it.
@@ -112,6 +126,9 @@ struct OfferRecord: Codable, Identifiable, Equatable {
 }
 
 final class HistoryStore: ObservableObject {
+    /// One history for the whole app: the screens and the shortcut action share it.
+    static let shared = HistoryStore()
+
     @Published private(set) var records: [OfferRecord] = []
     /// A spreadsheet copy of the history, refreshed on every save, for the Export button.
     @Published private(set) var exportURL: URL?
@@ -158,6 +175,12 @@ final class HistoryStore: ObservableObject {
                     records[i].setLocation(fix)
                     changed = true
                 }
+            } else if let i = sameCardIndex(s) {
+                // Already saved by the screenshot shortcut moments ago: the same card, caught both ways.
+                if records[i].source != "broadcast" && records[i].source != "both" {
+                    records[i].source = "both"
+                    changed = true
+                }
             } else if isRepeat(s) {
                 continue   // the same offer shown again (a screenshot, or the same card re-read later)
             } else {
@@ -168,6 +191,35 @@ final class HistoryStore: ObservableObject {
         if changed {
             records.sort { $0.seenAt > $1.seenAt }
             save()
+        }
+    }
+
+    /// Saves an offer read by the screenshot shortcut. Returns false if it was already saved
+    /// (the same card moments ago, or the same offer seen before, such as a screenshot of it).
+    @discardableResult
+    func addFromShortcut(_ offer: Offer, at date: Date, location: CLLocation?) -> Bool {
+        let seen = SeenOffer(id: UUID().uuidString, seenAt: date, offer: offer)
+        if let i = sameCardIndex(seen) {
+            // Tapped twice, or the screen broadcast caught it too.
+            var changed = false
+            if records[i].source == "broadcast" { records[i].source = "both"; changed = true }
+            if records[i].rating == nil, let r = offer.rating { records[i].rating = r; changed = true }
+            if records[i].types.isEmpty && !offer.types.isEmpty { records[i].types = offer.types; changed = true }
+            if !records[i].hasLocation, let fix = location { records[i].setLocation(fix); changed = true }
+            if changed { save() }
+            return false
+        }
+        if isRepeat(seen) { return false }
+        records.append(OfferRecord(seen, location: location, source: "shortcut"))
+        records.sort { $0.seenAt > $1.seenAt }
+        save()
+        return true
+    }
+
+    /// The same card saved within the last 90 seconds (the same numbers, any way of capturing).
+    private func sameCardIndex(_ s: SeenOffer) -> Int? {
+        records.firstIndex { r in
+            abs(s.seenAt.timeIntervalSince(r.seenAt)) <= 90 && r.offer.sameNumbers(as: s.offer)
         }
     }
 
@@ -202,7 +254,7 @@ final class HistoryStore: ObservableObject {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("TripCheck offers.csv")
         let typeColumns = TripType.all.map { "Type: " + $0 }.joined(separator: ",")
         var lines = ["Date,Time,Offer £,Minutes to pickup,Miles to pickup,Journey minutes,Journey miles,Passenger rating,Trip types,"
-                     + typeColumns + ",Exclusive,Holiday pay £,Latitude,Longitude,Location accuracy m"]
+                     + typeColumns + ",Exclusive,Holiday pay £,Latitude,Longitude,Location accuracy m,Captured by"]
         let day = DateFormatter()
         day.dateFormat = "yyyy-MM-dd"
         let time = DateFormatter()
@@ -221,6 +273,7 @@ final class HistoryStore: ObservableObject {
             row += [
                 r.exclusive ? "yes" : "no", number(r.holiday, "%.2f"),
                 number(r.latitude, "%.6f"), number(r.longitude, "%.6f"), number(r.locationAccuracy, "%.0f"),
+                r.sourceText,
             ]
             lines.append(row.joined(separator: ","))
         }

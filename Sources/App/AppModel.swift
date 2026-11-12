@@ -7,6 +7,23 @@ import SwiftUI
 import UIKit
 import CoreLocation
 
+extension TripSettings {
+    /// The driver's settings as saved on this phone (used by the app and the shortcut action).
+    static func saved() -> TripSettings {
+        if let data = UserDefaults.standard.data(forKey: "settings"),
+           let saved = try? JSONDecoder().decode(TripSettings.self, from: data) {
+            return saved
+        }
+        return TripSettings()
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults.standard.set(data, forKey: "settings")
+        }
+    }
+}
+
 final class AppModel: ObservableObject {
     @Published var settings: TripSettings {
         didSet {
@@ -25,9 +42,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var waitingForBroadcast = false
     private var waitingSince: Date?
 
+    /// The running app's model, if the app's screens have started (the shortcut action can run
+    /// without them).
+    static weak var current: AppModel?
+
     let pip = PiPController()
-    /// Every offer read while reading offers is on (the History tab).
-    let history = HistoryStore()
+    /// Every offer read, by the screen broadcast or the screenshot shortcut (the History tab).
+    let history = HistoryStore.shared
     /// Where the driver is when each offer appears.
     let location = LocationTracker()
     private let link = LoopbackReceiver()
@@ -38,12 +59,7 @@ final class AppModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: "settings"),
-           let saved = try? JSONDecoder().decode(TripSettings.self, from: data) {
-            settings = saved
-        } else {
-            settings = TripSettings()
-        }
+        settings = TripSettings.saved()
         reader = SharedChannel.read() ?? ReaderState()
 
         // Pass the floating window's on/off changes on to the screen.
@@ -68,6 +84,26 @@ final class AppModel: ObservableObject {
             self?.refresh()
         }
         refreshOverlay()
+        AppModel.current = self
+    }
+
+    /// Settings changed elsewhere (they're shared with the shortcut action through the saved copy).
+    func reloadSettingsIfChanged() {
+        let saved = TripSettings.saved()
+        if saved != settings { settings = saved }
+    }
+
+    /// An offer read by the screenshot shortcut: show it in the app (and the floating window,
+    /// if it's open) for 15 seconds, like a sample.
+    func showShortcutOffer(_ offer: Offer) {
+        sampleOffer = offer
+        sampleUntil = Date().addingTimeInterval(15)
+        refreshOverlay()
+    }
+
+    /// Closes the floating window by hand (it should close by itself when reading stops).
+    func closeFloatingWindow() {
+        pip.stop()
     }
 
     // MARK: state
@@ -152,9 +188,7 @@ final class AppModel: ObservableObject {
     // MARK: plumbing
 
     private func saveSettings() {
-        if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: "settings")
-        }
+        settings.save()
     }
 
     private func refreshOverlay() {
